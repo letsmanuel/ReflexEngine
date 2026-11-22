@@ -18,6 +18,14 @@
 
 namespace reflex {
 
+/// Phase of a fall. The character commits to a fall once it leans past the point of no return.
+enum class FallPhase : std::uint8_t {
+    None,     ///< on its feet
+    Tipping,  ///< past the lean point: falling, no balance help any more
+    Down,     ///< on the ground, dazed, flailing
+    GetUp     ///< fixed get-up sequence; any new impact cancels it and physics takes over again
+};
+
 /// Summary of the physical state of the character, computed by the Character each tick.
 struct BodyStateSummary {
     Vec3 com;                    ///< centre of mass (world)
@@ -35,7 +43,9 @@ struct BodyStateSummary {
     bool lying = false;          ///< body is down on the ground
     bool supine = false;         ///< lying on the back
     float lyingTime = 0.0f;      ///< seconds spent lying
-    float downHold = 0.0f;       ///< seconds a knocked-down character is still kept down (counts down once up)
+    FallPhase fallPhase = FallPhase::None;
+    float phaseTime = 0.0f;      ///< seconds in the current fall phase
+    float phaseDuration = 0.0f;  ///< planned length of the Down / GetUp phase
 };
 
 struct BehaviorContext {
@@ -102,7 +112,7 @@ struct Decision {
 class REFLEX_API DecisionLayer {
 public:
     /// Creates the layer with the built-in behaviours: Brace, StumbleRecover, LimpAway, SeekCover,
-    /// TurnAndLeanAway, ProtectHead, ProtectWound, BreakFall, Collapse, Incapacitated.
+    /// TurnAndLeanAway, ProtectHead, ProtectWound, KnockedDown (tipping, down, get up), Collapse, Incapacitated.
     DecisionLayer();
     ~DecisionLayer();
 
