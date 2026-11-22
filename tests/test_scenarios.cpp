@@ -601,3 +601,23 @@ TEST_CASE("Scenario: a crowd of characters stands side by side and each reacts o
     CHECK(crowd[2].GetBodyPartTransform(BodyPart::Pelvis).position.y < 0.6f);
     CHECK(crowd[8].GetBodyPartTransform(BodyPart::Pelvis).position.y > 0.85f);
 }
+
+TEST_CASE("Scenario: destroyed characters leave the world, so respawning a crowd does not pile up") {
+    Scenario s;
+    CHECK(s.world->CharacterCount() == 1);
+    for (int round = 0; round < 3; ++round) {
+        std::vector<Character> crowd;
+        for (int i = 1; i <= 5; ++i) {
+            CharacterDesc d = CharacterDesc::DefaultHumanoid();
+            d.spawn.position = {0, 0, -1.4f * static_cast<float>(i)};
+            crowd.push_back(s.world->CreateCharacter(d));
+        }
+        CHECK(s.world->CharacterCount() == 6);
+        s.Run(0.2f);
+        for (Character& c : crowd) s.world->DestroyCharacter(c);
+        CHECK(s.world->CharacterCount() == 1);
+        for (Character& c : crowd) CHECK_FALSE(c.IsValid());
+    }
+    s.Run(1.0f);
+    CHECK(s.Upright());
+}
