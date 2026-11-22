@@ -48,6 +48,7 @@ struct Ball {
     rx::Vec3 pos, dir;
     float speed = 0;
     float age = 0;
+    std::vector<int> hit; // indices of characters already struck (a ball hits each one once)
 };
 
 constexpr float kBallRadius = 0.45f;
@@ -58,6 +59,7 @@ struct App {
     bool charging = false;
     float chargeTime = 0.0f;
     std::vector<Ball> balls;
+    std::vector<rx::Character> crowd; // extra characters standing in a line behind the main one
     std::unique_ptr<rx::IPhysicsBackend> backend;
     std::unique_ptr<rx::World> world;
     rx::Character character;
@@ -149,7 +151,8 @@ void BuildScene(App& a, int scene) {
 }
 
 void LoadScene(App& a, int scene) {
-    a.character = rx::Character(); // release the character before its world goes away
+    a.crowd.clear();
+    a.character = rx::Character(); // release the characters before their world goes away
     a.world.reset();
     a.backend.reset();
     a.boxes.clear();
@@ -166,6 +169,17 @@ void LoadScene(App& a, int scene) {
     BuildScene(a, scene);
     for (int i = 0; i < 120; ++i) a.world->Step(1.0f / 120.0f);
     a.camTarget = {0, 1.0f, 0};
+}
+
+// A row of characters one behind the other along the ball path: shoot a ball through them all.
+void SpawnCrowd(App& a, int count) {
+    a.crowd.clear();
+    for (int i = 1; i <= count; ++i) {
+        rx::CharacterDesc d = rx::CharacterDesc::DefaultHumanoid(1.75f + 0.04f * static_cast<float>((i * 7) % 5) - 0.08f, 75.0f);
+        d.spawn.position = {0.12f * static_cast<float>((i * 5) % 3 - 1), 0.0f, -1.5f * static_cast<float>(i)};
+        a.crowd.push_back(a.world->CreateCharacter(d));
+    }
+    for (int i = 0; i < 120; ++i) a.world->Step(1.0f / 120.0f);
 }
 
 void UpdateCamera(App& a) {
@@ -237,25 +251,33 @@ void FireBall(App& a, Vector2 mouse, float charge) {
 }
 
 void UpdateBalls(App& a, float dt) {
+    std::vector<rx::Character*> everyone;
+    everyone.push_back(&a.character);
+    for (rx::Character& c : a.crowd) everyone.push_back(&c);
     for (Ball& b : a.balls) {
         float step = b.speed * dt;
         b.age += dt;
-        rx::BodyPart part;
-        rx::Vec3 pt;
-        float d = a.character.ClosestApproach(b.pos, b.dir, step, part, pt);
         rx::RayHit wall;
         bool hitWall = a.backend->RayCast(b.pos, b.dir, step + kBallRadius, true, wall);
-        if (d <= kBallRadius) {
-            // The ball hits: launch the character along the ball direction with a little lift.
+        for (size_t k = 0; k < everyone.size(); ++k) {
+            int idx = static_cast<int>(k);
+            if (std::find(b.hit.begin(), b.hit.end(), idx) != b.hit.end()) continue;
+            rx::BodyPart part;
+            rx::Vec3 pt;
+            float d = everyone[k]->ClosestApproach(b.pos, b.dir, step, part, pt);
+            if (d > kBallRadius) continue;
+            // The ball hits: it launches this character along its direction with a little lift and carries on.
             rx::Vec3 push = rx::Normalize(b.dir + rx::Vec3{0, 0.2f, 0});
             float impulse = kBallMass * b.speed;
-            a.character.ApplyImpact(push * impulse, pt);
+            everyone[k]->ApplyImpact(push * impulse, pt);
+            b.hit.push_back(idx);
             a.markers.push_back({pt, 1.0f, ORANGE});
             a.lastShot = std::string("FORCE ") + std::to_string(static_cast<int>(b.speed)) + " m/s -> launch " +
-                         std::to_string(static_cast<int>(impulse / 75.0f)) + " m/s";
-            b.age = 99.0f;
-        } else if (hitWall) {
-            a.markers.push_back({wall.point, 0.6f, WHITE});
+                         std::to_string(static_cast<int>(impulse / 75.0f)) + " m/s, hit " + std::to_string(b.hit.size());
+            b.speed *= 0.93f; // each body takes a little momentum
+        }
+        if (hitWall || b.speed < 4.0f) {
+            if (hitWall) a.markers.push_back({wall.point, 0.6f, WHITE});
             b.age = 99.0f;
         } else {
             b.pos = b.pos + b.dir * step;
@@ -278,13 +300,13 @@ Color HealthColor(float health, float flash) {
     return base;
 }
 
-void DrawCharacter(const App& a) {
-    const rx::CharacterDebugInfo& info = a.character.GetDebugInfo();
+void DrawCharacter(const App& a, const rx::Character& character, bool primary) {
+    const rx::CharacterDebugInfo& info = character.GetDebugInfo();
     for (int i = 0; i < rx::kBodyPartCount; ++i) {
         rx::BodyPart p = static_cast<rx::BodyPart>(i);
-        rx::Transform t = a.character.GetBodyPartTransform(p);
-        rx::ShapeDesc sh = a.character.GetPartShape(p);
-        Color c = HealthColor(info.parts[p].health, a.hitFlash[i]);
+        rx::Transform t = character.GetBodyPartTransform(p);
+        rx::ShapeDesc sh = character.GetPartShape(p);
+        Color c = HealthColor(info.parts[p].health, primary ? a.hitFlash[i] : 0.0f);
         rx::Vec3 axis = t.rotation.Rotate({0, 1, 0});
         if (sh.type == rx::ShapeType::Capsule) {
             Vector3 p0 = V(t.position - axis * sh.halfHeight), p1 = V(t.position + axis * sh.halfHeight);
@@ -304,7 +326,7 @@ void DrawCharacter(const App& a) {
         }
     }
     // face direction marker on the head
-    rx::Transform ht = a.character.GetBodyPartTransform(rx::BodyPart::Head);
+    rx::Transform ht = character.GetBodyPartTransform(rx::BodyPart::Head);
     rx::Vec3 nose = ht.position + ht.rotation.Rotate({0, 0, 0.13f});
     DrawSphere(V(nose), 0.03f, Color{240, 220, 200, 255});
 }
@@ -334,7 +356,8 @@ void DrawScene(const App& a) {
         DrawCubeWires(V(b.center), b.half.x * 2, b.half.y * 2, b.half.z * 2, Fade(BLACK, 0.35f));
     }
     DrawGrid(60, 1.0f);
-    DrawCharacter(a);
+    DrawCharacter(a, a.character, true);
+    for (const rx::Character& c : a.crowd) DrawCharacter(a, c, false);
     for (const Ball& b : a.balls) {
         DrawSphere(V(b.pos), kBallRadius, Color{255, 140, 40, 255});
         DrawSphereWires(V(b.pos), kBallRadius, 12, 12, Fade(BLACK, 0.5f));
@@ -420,7 +443,7 @@ void DrawOverlay(App& a, bool interactive) {
     // Left: injury state per limb
     DrawRectangle(0, 0, 320, H - 150, Fade(Color{16, 18, 24, 255}, 0.82f));
     DrawText("ReflexEngine", 12, 8, 20, RAYWHITE);
-    DrawText(TextFormat("%d FPS   shots: %d   last: %s", GetFPS(), a.shots, a.lastShot.c_str()), 12, 32, 12, LIGHTGRAY);
+    DrawText(TextFormat("%d FPS   shots: %d   characters: %d   last: %s", GetFPS(), a.shots, 1 + static_cast<int>(a.crowd.size()), a.lastShot.c_str()), 12, 32, 12, LIGHTGRAY);
     int y = 52;
     DrawText(TextFormat("control %.2f   consciousness %.2f", d.control, d.consciousness), 12, y, 12, RAYWHITE);
     Bar(12, y + 15, 296, 8, d.control, Color{90, 200, 120, 255});
@@ -477,7 +500,7 @@ void DrawOverlay(App& a, bool interactive) {
     DrawText(active.empty() ? "behaviour: (idle)" : TextFormat("behaviour: %s", active.c_str()), 12, H - 142, 16, Color{255, 210, 90, 255});
     DrawWrapped(std::string("reason: ") + d.reason, 12, H - 118, W - 24, 15, RAYWHITE);
     if (a.scene == 1) {
-        DrawText("FORCE LAB: hold LMB to charge a giant ball, release to fire at the cursor   |   1 shooting range", 12, H - 20, 13, GRAY);
+        DrawText("FORCE LAB: hold LMB to charge a giant ball, release to fire   |   C crowd   X clear   R reset   1 shooting range", 12, H - 20, 13, GRAY);
         float ch = ChargeFraction(a);
         int bw = 360, bx = W / 2 - bw / 2, by = H - 175;
         if (a.charging || ch > 0) {
@@ -485,12 +508,14 @@ void DrawOverlay(App& a, bool interactive) {
             DrawText(TextFormat("FORCE  %.0f m/s  (launch ~%.0f m/s)", BallSpeed(ch), kBallMass * BallSpeed(ch) / 75.0f), bx, by - 18, 14, ORANGE);
         }
     } else {
-        DrawText("LMB shoot   RMB orbit   wheel zoom   R reset   Tab overlay   A animation   2 force lab", 12, H - 20, 13, GRAY);
+        DrawText("LMB shoot   RMB orbit   wheel zoom   R reset   Tab overlay   A animation   C crowd   2 force lab", 12, H - 20, 13, GRAY);
     }
 }
 
 void ResetAll(App& a) {
     a.character.Reset();
+    for (rx::Character& c : a.crowd) c.Reset();
+    a.balls.clear();
     a.character.SetAnimationWeight(0.0f, 0.0f);
     a.markers.clear();
     a.tracers.clear();
@@ -583,6 +608,8 @@ int main(int argc, char** argv) {
         }
         if (IsKeyPressed(KEY_TAB)) app.overlay = !app.overlay;
         if (!capture && !bench) {
+            if (IsKeyPressed(KEY_C)) SpawnCrowd(app, 10);
+            if (IsKeyPressed(KEY_X)) app.crowd.clear();
             if (IsKeyPressed(KEY_ONE) && app.scene != 0) LoadScene(app, 0);
             if (IsKeyPressed(KEY_TWO) && app.scene != 1) LoadScene(app, 1);
         }
