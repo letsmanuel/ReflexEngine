@@ -458,7 +458,13 @@ int main(int argc, char** argv) {
     float scriptTime = 0.0f;
     int frame = 0;
     if (capture) {
-        ChangeDirectory(captureDir.c_str()); // raylib writes screenshots into the working directory
+        // raylib writes screenshots into the working directory: refuse to run if we cannot switch to the target,
+        // so frames are never dumped somewhere unexpected (e.g. a synced project folder).
+        if (!ChangeDirectory(captureDir.c_str())) {
+            TraceLog(LOG_ERROR, "Capture directory '%s' is not usable, aborting", captureDir.c_str());
+            CloseWindow();
+            return 1;
+        }
         app.camYaw = 0.65f; // look from the shooter's side so the character faces the camera
         app.camPitch = 0.20f;
         app.camDist = 3.9f;
