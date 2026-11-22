@@ -193,6 +193,7 @@ TEST_CASE("Behavior: stumble recovery requests a step when the capture point lea
 TEST_CASE("Behavior: break fall when tipping over while still conscious") {
     Scene s;
     s.body.tilt = 1.1f;
+    s.body.supportMargin = 0.4f;
     s.body.tiltDirection = {0, 0, 1};
     const Decision& d = s.Think();
     REQUIRE(Has(d, "BreakFall"));

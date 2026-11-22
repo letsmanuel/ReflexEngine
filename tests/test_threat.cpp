@@ -111,3 +111,17 @@ TEST_CASE("Threat: user cover query takes precedence") {
     REQUIRE(p.hasCover);
     CHECK(p.coverPoint.x == doctest::Approx(1.0f));
 }
+
+TEST_CASE("Threat: latched near-miss side does not flip when the character moves afterwards") {
+    ThreatModel t;
+    NearMissEvent m;
+    m.closestPoint = {0.2f, 1.7f, 0.3f};
+    m.direction = {0, 0, -1};
+    m.distance = 0.15f;
+    m.nearestPart = BodyPart::Head;
+    t.RegisterNearMiss(m, Origin(), {0, 1.7f, 0});
+    // The character has since moved 0.5 m to the left: the stored point is now on its right.
+    Transform moved{{0.5f, 1, 0}, Quat::Identity()};
+    ThreatPicture p = t.Evaluate(moved, {0.5f, 1.7f, 0});
+    CHECK(p.nearMissSide == Side::Left);
+}
