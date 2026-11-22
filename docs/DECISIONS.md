@@ -26,7 +26,7 @@ Behaviours score themselves; the best one per channel (locomotion, recovery, upp
 17 parts. Bodies are axis-aligned at the bind pose so a joint's drive target is the relative rotation delta.
 
 ## Known limitations
-- Verified on MSVC and GCC (MinGW) locally; see the Actions tab for Linux/macOS CI.
+- Windows (MSVC) is the supported platform. The code also builds with GCC (MinGW) and passed on macOS CI, but Linux/macOS are not maintained.
 - The demo draws a primitive humanoid, not a rigged model.
 - Crawling is a pose with limb motion, not locomotion. The on-the-back struggle is covered by unit tests, but physically lying on the back was not reproduced in the headless simulator.
 - Tuned for flat ground only.
