@@ -137,12 +137,9 @@ public:
             o.crouch = std::max(o.crouch, 0.7f * w);
             clause += "behind cover, duck low";
         } else {
-            Vec3 lateral = Cross({0, 1, 0}, c.threat.fireDirection);
-            if (Dot(lateral, ToWorld(c, {1, 0, 0})) < 0) lateral = -lateral;
-            o.moveDirection = Normalize(lateral * 0.6f + c.threat.fireDirection * 0.4f);
-            o.moveSpeed = std::max(o.moveSpeed, 0.6f * w);
+            // No cover anywhere: duck low and stay put. Shuffling about only looks like flapping.
             o.crouch = std::max(o.crouch, 0.45f * w);
-            clause += "no cover: leave the line of fire, duck low";
+            clause += "no cover: duck low and stay small";
         }
     }
 };
@@ -250,33 +247,6 @@ public:
 };
 
 // ---------------------------------------------------------------------------------------------------------
-class BreakFall final : public Behavior {
-public:
-    const char* Name() const override { return "BreakFall"; }
-    Channel GetChannel() const override { return Channel::Fall; }
-    float Score(const BehaviorContext& c) const override {
-        if (c.injury.ControlLevel() < 0.3f || c.injury.IsIncapacitated()) return 0.0f;
-        if (c.body.supportMargin < 0.1f) return 0.0f; // still recoverable: keep stepping instead
-        return Saturate((c.body.tilt - 0.7f) / 0.5f) * 0.9f;
-    }
-    void Apply(const BehaviorContext& c, float w, ReactionTargets& o, std::string& clause) const override {
-        o.breakFall = true;
-        o.assistScale *= 1.0f - 0.5f * w;
-        Vec3 local = c.body.heading.Conjugate().Rotate(c.body.tiltDirection);
-        float fwd = std::max(0.0f, local.z), side = std::abs(local.x);
-        for (Side s : {Side::Left, Side::Right}) {
-            // Reach towards the fall direction.
-            float out = side * 1.1f * (local.x * SideSign(s) > 0 ? 1.0f : 0.4f);
-            o.jointOffset[UpperArm(s)] += Vec3{-1.3f * fwd * w, 0, SideSign(s) * out * w};
-            o.jointOffset[LowerArm(s)] += Vec3{-0.4f * fwd * w, 0, 0};
-        }
-        o.jointOffset[BodyPart::Head] += Vec3{0.4f * w, 0, 0};
-        o.crouch = std::max(o.crouch, 0.5f * w);
-        clause += "falling: reach out to break the fall, tuck the head";
-    }
-};
-
-// ---------------------------------------------------------------------------------------------------------
 class Collapse final : public Behavior {
 public:
     const char* Name() const override { return "Collapse"; }
@@ -348,19 +318,51 @@ public:
     }
 };
 
-/// Knocked off its feet (thrown, shoved, fell over) and now lying down: it stays down protecting itself.
+/// A fall: tipping over past the lean point, flailing on the ground, then a fixed get-up sequence.
 class KnockedDown final : public Behavior {
 public:
     const char* Name() const override { return "KnockedDown"; }
     Channel GetChannel() const override { return Channel::Fall; }
     float Score(const BehaviorContext& c) const override {
         if (c.injury.IsDead() || c.injury.IsIncapacitated()) return 0.0f;
-        return (c.body.lying && c.body.lyingTime > 0.4f) || c.body.downHold > 0.0f ? 0.65f : 0.0f;
+        return c.body.fallPhase != FallPhase::None ? 0.68f : 0.0f;
     }
     void Apply(const BehaviorContext& c, float, ReactionTargets& o, std::string& clause) const override {
-        // Fully down while lying; once up, the descent state fades out over the last second (a gradual get-up).
-        float sink = c.body.lying ? 1.0f : Saturate(c.body.downHold);
-        GroundPose(c, sink, o, clause, "knocked down");
+        switch (c.body.fallPhase) {
+            case FallPhase::Tipping: {
+                // Past the point of no return: no more balance help, reach out and tuck the head.
+                o.breakFall = true;
+                o.assistScale *= 0.04f;
+                o.crouch = std::max(o.crouch, 0.35f);
+                Vec3 local = c.body.heading.Conjugate().Rotate(c.body.tiltDirection);
+                float fwd = std::max(0.0f, local.z), side = std::abs(local.x);
+                for (Side s : {Side::Left, Side::Right}) {
+                    float out = side * 1.1f * (local.x * SideSign(s) > 0 ? 1.0f : 0.4f);
+                    o.jointOffset[UpperArm(s)] += Vec3{-1.3f * fwd, 0, SideSign(s) * out};
+                    o.jointOffset[LowerArm(s)] += Vec3{-0.4f * fwd, 0, 0};
+                }
+                o.jointOffset[BodyPart::Head] += Vec3{0.4f, 0, 0};
+                clause += "tipping over past the point of no return: reaches out to break the fall";
+                break;
+            }
+            case FallPhase::Down: {
+                GroundPose(c, 1.0f, o, clause, "knocked down");
+                o.struggle = true; // dazed: flails on the ground
+                o.crawl = false;
+                clause += " (dazed, flailing)";
+                break;
+            }
+            case FallPhase::GetUp: {
+                float p = Saturate(c.body.phaseTime / std::max(0.1f, c.body.phaseDuration));
+                float sink = 1.0f - SmoothStep(p);
+                GroundPose(c, sink, o, clause, "getting up");
+                o.groundPose = sink; // the stand-up blends from the ground pose to standing
+                o.struggle = false;
+                o.crawl = p < 0.45f; // first push up from hands and knees
+                break;
+            }
+            default: break;
+        }
     }
 };
 
@@ -411,7 +413,6 @@ DecisionLayer::DecisionLayer() {
     AddBehavior(std::make_unique<TurnAndLeanAway>());
     AddBehavior(std::make_unique<ProtectHead>());
     AddBehavior(std::make_unique<ProtectWound>());
-    AddBehavior(std::make_unique<BreakFall>());
     AddBehavior(std::make_unique<Collapse>());
     AddBehavior(std::make_unique<Incapacitated>());
     AddBehavior(std::make_unique<KnockedDown>());
@@ -493,6 +494,7 @@ const Decision& DecisionLayer::Decide(const BehaviorContext& ctx, float dt) {
         lastWinners_.push_back(winner[ch]);
         key += winner[ch]->Name();
         key += ';';
+        key += clause;
     }
 
     reasonTimer_ += dt;
