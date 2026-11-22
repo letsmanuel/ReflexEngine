@@ -437,3 +437,70 @@ TEST_CASE("Scenario: two characters coexist and react independently") {
     CHECK(c2.GetBodyPartTransform(BodyPart::Pelvis).position.y > 0.85f);
     CHECK(c2.GetDebugInfo().control == doctest::Approx(1.0f));
 }
+
+TEST_CASE("Scenario: launched backwards by a huge force -> flies, lands, stays down, then gets up; nothing explodes") {
+    Scenario s;
+    s.Run(1.0f);
+    Vec3 start = s.Pelvis();
+    // 15 m/s velocity change towards -Z (backwards for a character facing +Z), delivered at the chest.
+    s.c.ApplyImpact({0, 0, -15.0f * 75.0f}, s.c.GetBodyPartTransform(BodyPart::Chest).position);
+    bool down = false, finite = true;
+    float maxSpeed = 0, minY = 10;
+    int n = static_cast<int>(5.0f / s.dt);
+    for (int i = 0; i < n; ++i) {
+        s.world->Step(s.dt);
+        Vec3 p = s.Pelvis();
+        finite &= std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
+        down |= HasBehavior(s.Info(), "KnockedDown");
+        maxSpeed = std::max(maxSpeed, Length(s.Info().comVelocity));
+        minY = std::min(minY, p.y);
+    }
+    CHECK(finite);
+    CHECK(maxSpeed > 8.0f);
+    CHECK(maxSpeed < 40.0f);               // no runaway energy
+    CHECK(s.Pelvis().z < start.z - 2.0f);  // thrown backwards
+    CHECK(s.Info().control > 0.8f);        // conscious and uninjured: shock only
+    CHECK(s.c.Injury().TorsoDamage() == doctest::Approx(0.0f));
+    // It ends up on the ground...
+    CHECK(minY < 0.45f);
+    // ...is held down for a few seconds, protecting itself...
+    CHECK(down);
+    // ...and eventually gets back on its feet.
+    s.Run(6.0f);
+    CHECK(s.Pelvis().y > 0.7f);
+    CHECK(s.Upright());
+}
+
+TEST_CASE("Scenario: an extreme launch stays stable") {
+    Scenario s;
+    s.Run(1.0f);
+    s.c.ApplyImpact({0, 0.3f * 75.0f * 30.0f, -75.0f * 30.0f}, s.c.GetBodyPartTransform(BodyPart::Chest).position);
+    bool finite = true;
+    float maxSpeed = 0;
+    int n = static_cast<int>(1.6f / s.dt); // 30 m/s: the 120 m test ground ends after ~2 s
+    for (int i = 0; i < n; ++i) {
+        s.world->Step(s.dt);
+        Vec3 p = s.Pelvis();
+        finite &= std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) && p.y > -0.5f;
+        maxSpeed = std::max(maxSpeed, Length(s.Info().comVelocity));
+    }
+    CHECK(finite);
+    CHECK(maxSpeed < 80.0f);
+    CHECK(s.Pelvis().y > -0.2f); // never falls through the ground
+}
+
+TEST_CASE("Scenario: hands do not flop beyond their wrist limits") {
+    Scenario s;
+    s.c.SetGlobalAuthority(0.0f, 0.0f); // passive ragdoll: worst case for floppy hands
+    float maxBend = 0;
+    int n = static_cast<int>(3.0f / s.dt);
+    for (int i = 0; i < n; ++i) {
+        s.world->Step(s.dt);
+        for (Side sd : {Side::Left, Side::Right}) {
+            Quat rel = s.c.GetBodyPartTransform(LowerArm(sd)).rotation.Conjugate() *
+                       s.c.GetBodyPartTransform(Hand(sd)).rotation;
+            maxBend = std::max(maxBend, Length(rel.ToRotationVector()));
+        }
+    }
+    CHECK(maxBend < 0.75f);
+}

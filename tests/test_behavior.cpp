@@ -272,3 +272,17 @@ TEST_CASE("Behavior: incapacitated on the back -> struggles; face down -> curls 
     CHECK(front.targets.crawl);
     CHECK_FALSE(front.targets.struggle);
 }
+
+TEST_CASE("Behavior: a healthy character that ends up lying down stays down, protecting itself") {
+    Scene s;
+    s.body.lying = true;
+    s.body.supine = false;
+    s.body.lyingTime = 1.0f;
+    const Decision& d = s.Think();
+    REQUIRE(Has(d, "KnockedDown"));
+    CHECK(d.targets.crawl);
+    CHECK(d.targets.assistScale < 0.01f); // no balance help: it does not pop back up
+    CHECK(Contains(d.reason, "knocked down"));
+    s.body.lyingTime = 0.1f; // only just went down: still reacting to the fall
+    CHECK_FALSE(Has(s.Think(), "KnockedDown"));
+}
