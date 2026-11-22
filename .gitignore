@@ -1,0 +1,12 @@
+Agents.md
+AGENTS.md
+build/
+build-*/
+out/
+.vs/
+.claude/
+*.user
+CMakeUserPresets.json
+.cache/
+_deps/
+
