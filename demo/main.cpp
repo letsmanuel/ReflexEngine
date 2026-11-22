@@ -44,7 +44,20 @@ struct Tracer {
     float life;
 };
 
+struct Ball {
+    rx::Vec3 pos, dir;
+    float speed = 0;
+    float age = 0;
+};
+
+constexpr float kBallRadius = 0.45f;
+constexpr float kBallMass = 60.0f; // kg: a giant ball
+
 struct App {
+    int scene = 0; // 0 = shooting range, 1 = force lab
+    bool charging = false;
+    float chargeTime = 0.0f;
+    std::vector<Ball> balls;
     std::unique_ptr<rx::IPhysicsBackend> backend;
     std::unique_ptr<rx::World> world;
     rx::Character character;
@@ -77,16 +90,25 @@ void AddStaticBox(App& a, rx::Vec3 center, rx::Vec3 half, Color color, bool addC
     (void)addCover;
 }
 
-void BuildScene(App& a) {
+void BuildScene(App& a, int scene) {
     a.backend = rx::CreateJoltBackend();
     AddStaticBox(a, {0, -0.5f, 0}, {40, 0.5f, 40}, Color{70, 74, 82, 255});
-    // Cover: crates and walls around the character
     a.boxes.back().color = Color{58, 62, 70, 255};
+    if (scene == 1) {
+        // Force lab: open floor with a brick wall and crates behind the character to be thrown into.
+        AddStaticBox(a, {0.0f, 2.0f, -14.0f}, {9.0f, 2.0f, 0.5f}, Color{150, 82, 70, 255});
+        AddStaticBox(a, {-4.0f, 0.5f, -10.0f}, {0.5f, 0.5f, 0.5f}, Color{176, 128, 72, 255});
+        AddStaticBox(a, {-4.0f, 1.5f, -10.0f}, {0.5f, 0.5f, 0.5f}, Color{150, 108, 62, 255});
+        AddStaticBox(a, {4.0f, 0.5f, -9.0f}, {0.5f, 0.5f, 0.5f}, Color{176, 128, 72, 255});
+        AddStaticBox(a, {0.0f, 0.15f, -7.0f}, {1.2f, 0.15f, 1.5f}, Color{110, 114, 124, 255});
+    } else {
+    // Cover: crates and walls around the character
     AddStaticBox(a, {3.0f, 0.5f, -2.5f}, {0.5f, 0.5f, 0.5f}, Color{176, 128, 72, 255});
     AddStaticBox(a, {-3.2f, 0.5f, -1.5f}, {0.5f, 0.5f, 0.5f}, Color{176, 128, 72, 255});
     AddStaticBox(a, {-3.2f, 1.5f, -1.5f}, {0.5f, 0.5f, 0.5f}, Color{150, 108, 62, 255});
     AddStaticBox(a, {0.0f, 1.0f, -5.5f}, {3.0f, 1.0f, 0.2f}, Color{120, 124, 134, 255});
     AddStaticBox(a, {4.5f, 1.0f, 2.0f}, {0.2f, 1.0f, 1.8f}, Color{120, 124, 134, 255});
+    }
 
     a.world = std::make_unique<rx::World>(*a.backend);
     rx::CharacterDesc desc = rx::CharacterDesc::DefaultHumanoid(1.75f, 75.0f);
@@ -96,7 +118,7 @@ void BuildScene(App& a) {
 
     // The character knows about the cover objects: standing behind one on the side away from the shooter.
     std::vector<StaticBox> cover(a.boxes.begin() + 1, a.boxes.end());
-    a.character.Threat().SetCoverQuery([cover](const rx::Vec3& from, const rx::Vec3& towardShooter,
+    if (scene == 0) a.character.Threat().SetCoverQuery([cover](const rx::Vec3& from, const rx::Vec3& towardShooter,
                                                rx::Vec3& outCover) {
         float best = 1e9f;
         bool found = false;
@@ -124,6 +146,26 @@ void BuildScene(App& a) {
     auto set = [&](rx::BodyPart p, rx::Quat q) { a.animPose.local[static_cast<size_t>(d.mapping[p])].rotation = q; };
     set(rx::BodyPart::LeftUpperArm, rx::Quat::FromAxisAngle({1, 0, 0}, -2.6f) * rx::Quat::FromAxisAngle({0, 0, 1}, 0.3f));
     set(rx::BodyPart::RightUpperArm, rx::Quat::FromAxisAngle({1, 0, 0}, -2.6f) * rx::Quat::FromAxisAngle({0, 0, 1}, -0.3f));
+}
+
+void LoadScene(App& a, int scene) {
+    a.character = rx::Character(); // release the character before its world goes away
+    a.world.reset();
+    a.backend.reset();
+    a.boxes.clear();
+    a.markers.clear();
+    a.tracers.clear();
+    a.balls.clear();
+    a.animPose.local.clear();
+    a.charging = false;
+    for (float& f : a.hitFlash) f = 0;
+    a.scene = scene;
+    a.shots = 0;
+    a.lastShot = "-";
+    a.useAnimation = false;
+    BuildScene(a, scene);
+    for (int i = 0; i < 120; ++i) a.world->Step(1.0f / 120.0f);
+    a.camTarget = {0, 1.0f, 0};
 }
 
 void UpdateCamera(App& a) {
@@ -173,6 +215,54 @@ void ShootFromCamera(App& a, Vector2 mouse) {
     rx::Vec3 right = R(Vector3CrossProduct(ray.direction, {0, 1, 0}));
     rx::Vec3 shooter = R(ray.position) + rx::Normalize(right) * 0.6f + rx::Vec3{0, -0.35f, 0};
     FireAt(a, shooter, aim);
+}
+
+// ---- Force lab: hold to charge, release to launch a giant ball -------------------------------------------------
+float ChargeFraction(const App& a) { return rx::Saturate(a.chargeTime / 2.0f); }
+float BallSpeed(float charge) { return 6.0f + 36.0f * charge; }
+
+void FireBall(App& a, Vector2 mouse, float charge) {
+    Ray ray = GetMouseRay(mouse, a.camera);
+    rx::RayHit hit;
+    rx::Vec3 aim = R(ray.position) + R(ray.direction) * 30.0f;
+    if (a.backend->RayCast(R(ray.position), R(ray.direction), 100.0f, false, hit)) aim = hit.point;
+    rx::Vec3 right = R(Vector3CrossProduct(ray.direction, {0, 1, 0}));
+    rx::Vec3 shooter = R(ray.position) + rx::Normalize(right) * 0.6f + rx::Vec3{0, -0.4f, 0};
+    Ball b;
+    b.pos = shooter;
+    b.dir = rx::Normalize(aim - shooter);
+    b.speed = BallSpeed(charge);
+    a.balls.push_back(b);
+    ++a.shots;
+}
+
+void UpdateBalls(App& a, float dt) {
+    for (Ball& b : a.balls) {
+        float step = b.speed * dt;
+        b.age += dt;
+        rx::BodyPart part;
+        rx::Vec3 pt;
+        float d = a.character.ClosestApproach(b.pos, b.dir, step, part, pt);
+        rx::RayHit wall;
+        bool hitWall = a.backend->RayCast(b.pos, b.dir, step + kBallRadius, true, wall);
+        if (d <= kBallRadius) {
+            // The ball hits: launch the character along the ball direction with a little lift.
+            rx::Vec3 push = rx::Normalize(b.dir + rx::Vec3{0, 0.2f, 0});
+            float impulse = kBallMass * b.speed;
+            a.character.ApplyImpact(push * impulse, pt);
+            a.markers.push_back({pt, 1.0f, ORANGE});
+            a.lastShot = std::string("FORCE ") + std::to_string(static_cast<int>(b.speed)) + " m/s -> launch " +
+                         std::to_string(static_cast<int>(impulse / 75.0f)) + " m/s";
+            b.age = 99.0f;
+        } else if (hitWall) {
+            a.markers.push_back({wall.point, 0.6f, WHITE});
+            b.age = 99.0f;
+        } else {
+            b.pos = b.pos + b.dir * step;
+        }
+    }
+    a.balls.erase(std::remove_if(a.balls.begin(), a.balls.end(), [](const Ball& b) { return b.age > 4.0f; }),
+                  a.balls.end());
 }
 
 // ---- Drawing ----------------------------------------------------------------------------------------------------
@@ -245,6 +335,10 @@ void DrawScene(const App& a) {
     }
     DrawGrid(60, 1.0f);
     DrawCharacter(a);
+    for (const Ball& b : a.balls) {
+        DrawSphere(V(b.pos), kBallRadius, Color{255, 140, 40, 255});
+        DrawSphereWires(V(b.pos), kBallRadius, 12, 12, Fade(BLACK, 0.5f));
+    }
     for (const Tracer& t : a.tracers) DrawLine3D(V(t.a), V(t.b), Fade(YELLOW, t.life / 0.12f));
     for (const Marker& m : a.markers) DrawSphere(V(m.pos), 0.05f + 0.04f * m.life, Fade(m.color, rx::Saturate(m.life)));
     if (a.overlay) DrawDebug3D(a);
@@ -382,7 +476,17 @@ void DrawOverlay(App& a, bool interactive) {
     }
     DrawText(active.empty() ? "behaviour: (idle)" : TextFormat("behaviour: %s", active.c_str()), 12, H - 142, 16, Color{255, 210, 90, 255});
     DrawWrapped(std::string("reason: ") + d.reason, 12, H - 118, W - 24, 15, RAYWHITE);
-    DrawText("LMB shoot   RMB orbit   wheel zoom   R reset   Tab overlay   A toggle animation", 12, H - 20, 13, GRAY);
+    if (a.scene == 1) {
+        DrawText("FORCE LAB: hold LMB to charge a giant ball, release to fire at the cursor   |   1 shooting range", 12, H - 20, 13, GRAY);
+        float ch = ChargeFraction(a);
+        int bw = 360, bx = W / 2 - bw / 2, by = H - 175;
+        if (a.charging || ch > 0) {
+            Bar(bx, by, bw, 16, ch, Color{255, 140, 40, 255});
+            DrawText(TextFormat("FORCE  %.0f m/s  (launch ~%.0f m/s)", BallSpeed(ch), kBallMass * BallSpeed(ch) / 75.0f), bx, by - 18, 14, ORANGE);
+        }
+    } else {
+        DrawText("LMB shoot   RMB orbit   wheel zoom   R reset   Tab overlay   A animation   2 force lab", 12, H - 20, 13, GRAY);
+    }
 }
 
 void ResetAll(App& a) {
@@ -449,9 +553,7 @@ int main(int argc, char** argv) {
 #endif
     App app;
     gApp = &app;
-    BuildScene(app);
-    // settle
-    for (int i = 0; i < 120; ++i) app.world->Step(1.0f / 120.0f);
+    LoadScene(app, 0);
 
     std::vector<ScriptStep> script = {{1.0f, 0}, {4.5f, 1}, {7.5f, 2}, {10.5f, 4}, {13.0f, 3}};
     size_t scriptNext = 0;
@@ -480,6 +582,10 @@ int main(int argc, char** argv) {
             scriptTime = 0;
         }
         if (IsKeyPressed(KEY_TAB)) app.overlay = !app.overlay;
+        if (!capture && !bench) {
+            if (IsKeyPressed(KEY_ONE) && app.scene != 0) LoadScene(app, 0);
+            if (IsKeyPressed(KEY_TWO) && app.scene != 1) LoadScene(app, 1);
+        }
         if (IsKeyPressed(KEY_A)) {
             app.useAnimation = !app.useAnimation;
             app.character.SetAnimationPose(app.animPose);
@@ -493,8 +599,23 @@ int main(int argc, char** argv) {
                 app.camPitch = Clamp(app.camPitch + md.y * 0.006f, -0.2f, 1.4f);
             }
             app.camDist = Clamp(app.camDist - GetMouseWheelMove() * 0.4f, 1.8f, 20.0f);
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !MouseOverUI(app) && gActiveSlider == nullptr)
-                ShootFromCamera(app, GetMousePosition());
+            if (app.scene == 0) {
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !MouseOverUI(app) && gActiveSlider == nullptr)
+                    ShootFromCamera(app, GetMousePosition());
+            } else {
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !MouseOverUI(app) && gActiveSlider == nullptr) {
+                    app.charging = true;
+                    app.chargeTime = 0.0f;
+                }
+                if (app.charging) {
+                    app.chargeTime += dt;
+                    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                        FireBall(app, GetMousePosition(), ChargeFraction(app));
+                        app.charging = false;
+                        app.chargeTime = 0.0f;
+                    }
+                }
+            }
         } else {
             scriptTime += dt;
             RunScript(app, scriptTime, scriptNext, script);
@@ -508,6 +629,7 @@ int main(int argc, char** argv) {
 
         // Simulation
         app.world->Step(dt);
+        UpdateBalls(app, dt);
         for (float& f : app.hitFlash) f = std::max(0.0f, f - dt * 2.5f);
         for (auto& m : app.markers) m.life -= dt;
         for (auto& t : app.tracers) t.life -= dt;
