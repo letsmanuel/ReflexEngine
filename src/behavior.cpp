@@ -225,22 +225,24 @@ public:
         float armNeed = armCap < 0.8f ? (1.0f - armCap) : 0.0f;
         if (Saturate(pain * 1.3f) >= armNeed) {
             // Torso wound: hunch over it and cover it with both arms.
-            o.jointOffset[BodyPart::Spine] += Vec3{0.35f * w, 0, 0};
-            o.jointOffset[BodyPart::Chest] += Vec3{0.30f * w, 0, 0};
+            o.jointOffset[BodyPart::Spine] += Vec3{0.17f * w, 0, 0};
+            o.jointOffset[BodyPart::Chest] += Vec3{0.15f * w, 0, 0};
             RaiseArms(o, 0.7f, -0.15f, 1.7f, w);
             o.crouch = std::max(o.crouch, 0.2f * w);
             o.speedLimit = std::min(o.speedLimit, 1.0f - 0.4f * w);
             clause += "hunch over the wound, protect it with the arms, slow down";
         } else {
-            // Arm wound: the injured arm is cradled against the body, the other arm balances.
-            o.jointOffset[UpperArm(weak)] += Vec3{-0.4f * w, 0, SideSign(weak) * -0.1f * w};
+            // Arm wound: the injured arm is pulled across the body and cradled, the shoulder is turned away
+            // from the shooter, the other arm stays out for balance.
+            o.jointOffset[UpperArm(weak)] += Vec3{-0.55f * w, 0, SideSign(weak) * -0.45f * w};
             o.jointOffset[LowerArm(weak)] += Vec3{-1.9f * w, 0, 0};
             Side other = Opposite(weak);
             o.jointOffset[UpperArm(other)] += Vec3{-0.15f * w, 0, SideSign(other) * 0.7f * w};
             o.jointOffset[LowerArm(other)] += Vec3{-0.3f * w, 0, 0};
             o.authorityScale[UpperArm(weak)] *= 0.7f;
             o.authorityScale[LowerArm(weak)] *= 0.7f;
-            o.jointOffset[BodyPart::Spine] += Vec3{0.15f * w, 0, 0};
+            o.jointOffset[BodyPart::Spine] += Vec3{0.10f * w, 0, 0};
+            if (c.threat.active) o.turnYaw += SideSign(weak) * 0.45f * w;
             clause += weak == Side::Left ? "cradle the left arm, use the right arm for balance"
                                          : "cradle the right arm, use the left arm for balance";
         }
@@ -253,7 +255,7 @@ public:
     const char* Name() const override { return "BreakFall"; }
     Channel GetChannel() const override { return Channel::Fall; }
     float Score(const BehaviorContext& c) const override {
-        if (c.injury.ControlLevel() < 0.3f) return 0.0f;
+        if (c.injury.ControlLevel() < 0.3f || c.injury.IsIncapacitated()) return 0.0f;
         if (c.body.supportMargin < 0.1f) return 0.0f; // still recoverable: keep stepping instead
         return Saturate((c.body.tilt - 0.7f) / 0.5f) * 0.9f;
     }
@@ -302,6 +304,45 @@ public:
     }
 };
 
+// ---------------------------------------------------------------------------------------------------------
+class Incapacitated final : public Behavior {
+public:
+    const char* Name() const override { return "Incapacitated"; }
+    Channel GetChannel() const override { return Channel::Fall; }
+    float Score(const BehaviorContext& c) const override { return c.injury.IsIncapacitated() ? 0.7f : 0.0f; }
+    void Apply(const BehaviorContext& c, float, ReactionTargets& o, std::string& clause) const override {
+        const float t = c.injury.IncapacitatedTime();
+        // Sinking: the assist fades over ~2 s so the body slowly goes down instead of dropping.
+        const float sink = Saturate(t / 2.0f);
+        const float ground = c.body.lying ? 1.0f : Saturate((sink - 0.55f) / 0.45f);
+        o.assistScale *= (1.0f - sink) * (1.0f - sink);
+        o.crouch = std::max(o.crouch, sink);
+        o.groundPose = std::max(o.groundPose, ground);
+        o.collapse = std::max(o.collapse, 0.5f * sink);
+        // Curl up around the wound, arms covering head and chest.
+        o.jointOffset[BodyPart::Spine] += Vec3{0.30f * sink, 0, 0};
+        o.jointOffset[BodyPart::Chest] += Vec3{0.30f * sink, 0, 0};
+        o.jointOffset[BodyPart::Head] += Vec3{0.30f * sink, 0, 0};
+        RaiseArms(o, 1.1f, -0.1f, 2.0f, sink);
+        // Weakened muscles: enough to hold a protective pose, never enough to stand again.
+        for (int i = 1; i < kBodyPartCount; ++i) {
+            BodyPart p = static_cast<BodyPart>(i);
+            float f = IsLegPart(p) ? 0.5f : IsArmPart(p) ? 0.55f : 0.6f;
+            if (c.body.lying && c.body.supine && (p == BodyPart::Spine || p == BodyPart::Chest)) f = 0.22f;
+            o.authorityScale[p] *= Lerp(1.0f, f, sink);
+        }
+        if (c.body.lying && c.body.supine) {
+            o.struggle = true;
+            clause += "incapacitated, on the back: struggles to get up but cannot, keeps falling back down";
+        } else if (c.body.lying) {
+            o.crawl = true;
+            clause += "incapacitated: curled up on the ground protecting the head and wound, crawling";
+        } else {
+            clause += "incapacitated: legs give out, slowly sinking to the ground, curling up to protect the wound";
+        }
+    }
+};
+
 } // namespace
 
 std::string DescribeSituation(const BehaviorContext& c) {
@@ -311,6 +352,7 @@ std::string DescribeSituation(const BehaviorContext& c) {
         std::snprintf(buf, sizeof buf, "Critical damage (control %.2f)", inj.ControlLevel());
         return buf;
     }
+    if (inj.IsIncapacitated()) return "Incapacitated by a torso wound";
     Side weak = inj.WeakerLeg();
     float cap = inj.SupportCapacity(weak);
     if (cap < kNoLimpAbove) {
@@ -350,6 +392,7 @@ DecisionLayer::DecisionLayer() {
     AddBehavior(std::make_unique<ProtectWound>());
     AddBehavior(std::make_unique<BreakFall>());
     AddBehavior(std::make_unique<Collapse>());
+    AddBehavior(std::make_unique<Incapacitated>());
 }
 
 DecisionLayer::~DecisionLayer() = default;
