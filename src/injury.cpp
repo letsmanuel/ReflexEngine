@@ -34,6 +34,14 @@ void InjuryModel::Reset() {
     lastHitPart_ = BodyPart::Chest;
     timeSinceHit_ = 1e9f;
     lastDamage_ = 0;
+    incapacitated_ = false;
+    incapTime_ = 0;
+}
+
+float InjuryModel::TorsoDamage() const {
+    float d = 0;
+    for (BodyPart p : {BodyPart::Pelvis, BodyPart::Spine, BodyPart::Chest}) d += (1.0f - parts_[p].health) * cfg_.maxHealth[p];
+    return d;
 }
 
 void InjuryModel::RecomputeCapacity(BodyPart p) {
@@ -62,6 +70,7 @@ void InjuryModel::ApplyDamage(BodyPart part, float damage) {
     lastDamage_ = damage;
     timeSinceHit_ = 0.0f;
     for (int i = 0; i < kBodyPartCount; ++i) RecomputeCapacity(static_cast<BodyPart>(i));
+    if (!incapacitated_ && TorsoDamage() >= cfg_.incapacitatingTorsoDamage) incapacitated_ = true;
 }
 
 void InjuryModel::ReportLegLoad(Side side, float load, float dt) {
@@ -72,6 +81,7 @@ void InjuryModel::ReportLegLoad(Side side, float load, float dt) {
 
 void InjuryModel::Update(float dt) {
     timeSinceHit_ += dt;
+    if (incapacitated_) incapTime_ += dt;
     for (int i = 0; i < kBodyPartCount; ++i) {
         BodyPart bp = static_cast<BodyPart>(i);
         PartState& s = parts_[bp];

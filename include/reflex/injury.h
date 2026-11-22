@@ -26,6 +26,7 @@ struct InjuryConfig {
     float bleedClotRate = 0.03f;   ///< bleeding rate decays by this fraction per second
     float consciousnessFallRate = 0.5f; ///< per second
     float consciousnessRiseRate = 0.15f;
+    float incapacitatingTorsoDamage = 25.0f; ///< torso damage (HP) that incapacitates
     float legFatiguePerSecond = 0.02f;  ///< fatigue growth per second at full load on an injured leg
 };
 
@@ -62,6 +63,12 @@ public:
     /// Overall control level 0..1 (the global authority ceiling imposed by injuries).
     float ControlLevel() const;
     bool IsDead() const { return vitality_ <= 0.0f; }
+    /// Damage (health points) taken by pelvis, spine and chest. A torso wound this serious (a bullet in the
+    /// chest) incapacitates the character: it goes to the ground and cannot get back up.
+    float TorsoDamage() const;
+    bool IsIncapacitated() const { return incapacitated_ && !IsDead(); }
+    /// Seconds since the character became incapacitated (0 if it is not).
+    float IncapacitatedTime() const { return incapacitated_ ? incapTime_ : 0.0f; }
     /// True when the character is about to lose consciousness or is dying.
     bool IsCritical() const { return vitality_ < 0.3f || consciousness_ < 0.45f; }
 
@@ -87,6 +94,8 @@ private:
     BodyPart lastHitPart_ = BodyPart::Chest;
     float timeSinceHit_ = 1e9f;
     float lastDamage_ = 0;
+    bool incapacitated_ = false;
+    float incapTime_ = 0;
 };
 
 } // namespace reflex
