@@ -65,6 +65,8 @@ struct CharacterDebugInfo {
     float tilt = 0;
     float supportMargin = 0;
     bool fallen = false;
+    FallPhase fallPhase = FallPhase::None; ///< None, Tipping (past the lean point), Down, GetUp
+    float fallPhaseTime = 0;
     std::vector<ActiveBehavior> activeBehaviors;
     std::string reason;                   ///< human-readable reasoning of the current decision
     ReactionTargets targets;

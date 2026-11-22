@@ -151,9 +151,58 @@ void Character::Impl::Tick(float dt) {
     const bool lying = (chest.transform.position.y - groundRef) < 0.5f * s;
     const bool supine = chest.transform.rotation.Rotate({0, 0, 1}).y > 0.4f;
     lyingTime = lying ? lyingTime + dt : 0.0f;
-    // Once knocked down it stays down for a while, then gets up gradually (assist ramps back in over the last second).
-    if (lying && lyingTime > 0.4f) downHold = 3.0f;
-    else downHold = std::max(0.0f, downHold - dt);
+
+    // ---- Fall state machine: tipping -> down -> get up ----------------------------------------------------------
+    const float overspeedNow = Saturate((Length(Horizontal(comVel)) - 3.5f) / 3.0f);
+    tipCooldown = std::max(0.0f, tipCooldown - dt);
+    phaseTime += dt;
+    if (injury.IsDead() || injury.IsIncapacitated()) {
+        fallPhase = FallPhase::None; // those have their own behaviours
+    } else {
+        switch (fallPhase) {
+            case FallPhase::None:
+                if (tipCooldown <= 0.0f && ((tilt > 0.55f && margin > 0.12f) || overspeedNow > 0.6f)) {
+                    fallPhase = FallPhase::Tipping;
+                    phaseTime = 0.0f;
+                } else if (lying && lyingTime > 0.3f) {
+                    fallPhase = FallPhase::Down;
+                    phaseTime = 0.0f;
+                    phaseDuration = 1.0f + NextRandom();
+                }
+                break;
+            case FallPhase::Tipping:
+                if ((lying && lyingTime > 0.25f) || phaseTime > 3.5f) {
+                    fallPhase = FallPhase::Down;
+                    phaseTime = 0.0f;
+                    phaseDuration = 1.0f + NextRandom(); // dazed on the ground for 1-2 s
+                } else if (tilt < 0.25f && !lying && phaseTime > 0.5f) {
+                    fallPhase = FallPhase::None;
+                    tipCooldown = 1.0f;
+                }
+                break;
+            case FallPhase::Down:
+                if (impactPending) {
+                    phaseTime = 0.0f;
+                    phaseDuration = 0.8f + 0.6f * NextRandom();
+                } else if (phaseTime >= phaseDuration) {
+                    fallPhase = FallPhase::GetUp;
+                    phaseTime = 0.0f;
+                    phaseDuration = 2.4f;
+                }
+                break;
+            case FallPhase::GetUp:
+                if (impactPending) { // physics takes over again
+                    fallPhase = FallPhase::Down;
+                    phaseTime = 0.0f;
+                    phaseDuration = 0.8f + 0.6f * NextRandom();
+                } else if (phaseTime >= phaseDuration) {
+                    fallPhase = FallPhase::None;
+                    tipCooldown = 1.5f;
+                }
+                break;
+        }
+    }
+    impactPending = false;
 
     // ---- 2. Assess + decide -----------------------------------------------------------------------------
     BodyStateSummary sum;
@@ -173,7 +222,9 @@ void Character::Impl::Tick(float dt) {
     sum.lying = lying;
     sum.supine = supine;
     sum.lyingTime = lyingTime;
-    sum.downHold = downHold;
+    sum.fallPhase = fallPhase;
+    sum.phaseTime = phaseTime;
+    sum.phaseDuration = phaseDuration;
 
     Transform frame{pel.transform.position, headingActual};
     ThreatPicture picture = threat.Evaluate(frame, st[Index(BodyPart::Head)].transform.position);
@@ -501,6 +552,8 @@ void Character::Impl::Tick(float dt) {
     debug.tilt = tilt;
     debug.supportMargin = margin;
     debug.fallen = comHeight < 0.45f * standPelvisHeight || tilt > 1.25f;
+    debug.fallPhase = fallPhase;
+    debug.fallPhaseTime = phaseTime;
     debug.activeBehaviors = decision.active;
     debug.reason = decision.reason;
     debug.targets = T;
