@@ -24,7 +24,7 @@ inline JointSpec SpecFor(BodyPart p) {
         case BodyPart::LeftLowerArm:
         case BodyPart::RightLowerArm: return {JointType::Hinge, 0, 0, -2.6f, 0.05f};
         case BodyPart::LeftHand:
-        case BodyPart::RightHand: return {JointType::Ball, 0.6f, 0.6f, -0.4f, 0.4f};
+        case BodyPart::RightHand: return {JointType::Ball, 0.5f, 0.5f, -0.2f, 0.2f};
         case BodyPart::LeftUpperLeg:
         case BodyPart::RightUpperLeg: return {JointType::Ball, 1.4f, 1.4f, -0.6f, 0.6f};
         case BodyPart::LeftLowerLeg:
@@ -50,7 +50,7 @@ inline DriveBase DriveFor(BodyPart p) {
         case BodyPart::LeftLowerArm:
         case BodyPart::RightLowerArm: return {90, 9, 60};
         case BodyPart::LeftHand:
-        case BodyPart::RightHand: return {20, 2, 12};
+        case BodyPart::RightHand: return {45, 5, 16};
         case BodyPart::LeftUpperLeg:
         case BodyPart::RightUpperLeg: return {1000, 100, 420};
         case BodyPart::LeftLowerLeg:
@@ -58,6 +58,23 @@ inline DriveBase DriveFor(BodyPart p) {
         case BodyPart::LeftFoot:
         case BodyPart::RightFoot: return {200, 20, 120};
         default: return {0, 0, 0};
+    }
+}
+
+/// Passive joint friction (N*m): keeps unpowered limbs, and especially the hands, from flopping about.
+inline float FrictionFor(BodyPart p) {
+    switch (p) {
+        case BodyPart::LeftHand:
+        case BodyPart::RightHand: return 1.6f;
+        case BodyPart::Neck:
+        case BodyPart::Head: return 1.5f;
+        case BodyPart::LeftFoot:
+        case BodyPart::RightFoot: return 2.0f;
+        case BodyPart::LeftLowerArm:
+        case BodyPart::RightLowerArm:
+        case BodyPart::LeftUpperArm:
+        case BodyPart::RightUpperArm: return 2.5f;
+        default: return 4.0f;
     }
 }
 
