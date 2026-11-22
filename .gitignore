@@ -12,3 +12,4 @@ _deps/
 
 frame_*.png
 *.gif
+!docs/demo.gif
