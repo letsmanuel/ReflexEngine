@@ -1,7 +1,9 @@
 add_executable(reflex_tests
     test_main.cpp
     test_backend.cpp
-    test_injury.cpp)
+    test_injury.cpp
+    test_authority.cpp
+    test_balance.cpp)
 
 target_link_libraries(reflex_tests PRIVATE reflex doctest::doctest)
 if(MSVC)
