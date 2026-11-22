@@ -296,11 +296,18 @@ void LoadScene(App& a, int scene) {
     a.camTarget = {0, 1.0f, 0};
 }
 
-// A row of characters one behind the other along the ball path: shoot a ball through them all.
-void SpawnCrowd(App& a, int count) {
+// Remove the crowd from the world (not just from our list), otherwise the characters keep living there.
+void ClearCrowd(App& a) {
     for (auto& k : a.crowdSkin) FreeSkinned(*k);
     a.crowdSkin.clear();
+    if (a.world)
+        for (rx::Character& c : a.crowd) a.world->DestroyCharacter(c);
     a.crowd.clear();
+}
+
+// A row of characters one behind the other along the ball path: shoot a ball through them all.
+void SpawnCrowd(App& a, int count) {
+    ClearCrowd(a); // pressing C again replaces the crowd instead of adding to it
     for (int i = 1; i <= count; ++i) {
         rx::CharacterDesc d = MakeDesc(a.useModel, 1.75f + (a.useModel ? 0.0f : 0.04f * static_cast<float>((i * 7) % 5) - 0.08f));
         d.spawn.position = {0.12f * static_cast<float>((i * 5) % 3 - 1), 0.0f, -1.5f * static_cast<float>(i)};
@@ -681,6 +688,14 @@ void RunScript(App& a, float t, size_t& next, const std::vector<ScriptStep>& scr
             case 2: FireAt(a, shooter, part(rx::BodyPart::Chest)); break;
             case 3: FireAt(a, shooter, part(rx::BodyPart::Head)); break;
             case 4: FireAt(a, shooter, part(rx::BodyPart::LeftLowerLeg)); break;
+            case 5: {
+                Ball b;
+                b.pos = shooter;
+                b.dir = rx::Normalize(part(rx::BodyPart::Chest) - shooter);
+                b.speed = BallSpeed(1.0f);
+                a.balls.push_back(b);
+                break;
+            }
         }
         ++next;
     }
@@ -716,10 +731,18 @@ int main(int argc, char** argv) {
 #endif
     App app;
     gApp = &app;
-    for (int i = 1; i < argc; ++i) if (!std::strcmp(argv[i], "--model")) app.useModel = true;
-    LoadScene(app, 0);
+    int startScene = 0;
+    bool startCrowd = false;
+    for (int i = 1; i < argc; ++i) {
+        if (!std::strcmp(argv[i], "--model")) app.useModel = true;
+        if (!std::strcmp(argv[i], "--scene") && i + 1 < argc) startScene = std::atoi(argv[i + 1]);
+        if (!std::strcmp(argv[i], "--crowd")) startCrowd = true;
+    }
+    LoadScene(app, startScene);
+    if (startCrowd) SpawnCrowd(app, 10);
 
     std::vector<ScriptStep> script = {{1.0f, 0}, {4.5f, 1}, {7.5f, 2}, {10.5f, 4}, {13.0f, 3}};
+    if (startScene == 1) script = {{1.0f, 5}, {6.0f, 5}};
     size_t scriptNext = 0;
     float scriptTime = 0.0f;
     int frame = 0;
@@ -731,6 +754,7 @@ int main(int argc, char** argv) {
             CloseWindow();
             return 1;
         }
+        if (startScene == 1) app.camDist = 7.0f;
         app.camYaw = 0.65f; // look from the shooter's side so the character faces the camera
         app.camPitch = 0.20f;
         app.camDist = 3.9f;
@@ -752,7 +776,7 @@ int main(int argc, char** argv) {
                 LoadScene(app, app.scene);
             }
             if (IsKeyPressed(KEY_C)) SpawnCrowd(app, 10);
-            if (IsKeyPressed(KEY_X)) app.crowd.clear();
+            if (IsKeyPressed(KEY_X)) ClearCrowd(app);
             if (IsKeyPressed(KEY_ONE) && app.scene != 0) LoadScene(app, 0);
             if (IsKeyPressed(KEY_TWO) && app.scene != 1) LoadScene(app, 1);
         }
