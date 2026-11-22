@@ -504,3 +504,100 @@ TEST_CASE("Scenario: hands do not flop beyond their wrist limits") {
     }
     CHECK(maxBend < 0.75f);
 }
+
+TEST_CASE("Scenario: blow to the legs -> the legs go first and the upper body is dragged after them") {
+    Scenario s;
+    s.Run(1.0f);
+    Vec3 footBefore = s.c.GetBodyPartTransform(BodyPart::LeftFoot).position;
+    Vec3 headBefore = s.Head();
+    s.c.ApplyImpact({0, 0, -12.0f * 75.0f}, s.c.GetBodyPartTransform(BodyPart::LeftLowerLeg).position);
+    s.Run(0.08f);
+    float footMoved = footBefore.z - s.c.GetBodyPartTransform(BodyPart::LeftFoot).position.z;
+    float headMoved = headBefore.z - s.Head().z;
+    CHECK(footMoved > 0.2f);
+    CHECK(footMoved > headMoved * 1.3f); // legs lead, head follows
+    s.Run(2.0f);
+    CHECK(s.Head().z < headBefore.z - 1.0f); // and the head does get dragged along
+}
+
+TEST_CASE("Scenario: past the lean point it falls, flails 1-2 s, gets up by a fixed sequence") {
+    Scenario s;
+    s.Run(1.0f);
+    s.c.ApplyImpact({0, 0, -12.0f * 75.0f}, s.c.GetBodyPartTransform(BodyPart::LeftLowerLeg).position);
+    bool tipping = false;
+    float downTime = 0, getUpTime = 0;
+    bool wasDown = false, wasGetUp = false, upright = false;
+    int n = static_cast<int>(12.0f / s.dt);
+    for (int i = 0; i < n; ++i) {
+        s.world->Step(s.dt);
+        FallPhase ph = s.Info().fallPhase;
+        tipping |= ph == FallPhase::Tipping;
+        if (ph == FallPhase::Down) { downTime += s.dt; wasDown = true; }
+        if (ph == FallPhase::GetUp) { getUpTime += s.dt; wasGetUp = true; }
+        if (wasGetUp && ph == FallPhase::None && s.Upright()) upright = true;
+    }
+    CHECK(tipping);
+    CHECK(wasDown);
+    CHECK(downTime >= 0.9f);   // flails on the ground...
+    CHECK(downTime <= 2.3f);   // ...for 1-2 s (plus a moment of landing)
+    CHECK(wasGetUp);
+    CHECK(getUpTime == doctest::Approx(2.4f).epsilon(0.1));
+    CHECK(upright);
+    CHECK(s.Pelvis().y > 0.7f);
+}
+
+TEST_CASE("Scenario: a new impact while getting up cancels the get-up and physics takes over") {
+    Scenario s;
+    s.Run(1.0f);
+    s.c.ApplyImpact({0, 0, -12.0f * 75.0f}, s.c.GetBodyPartTransform(BodyPart::LeftLowerLeg).position);
+    int n = static_cast<int>(10.0f / s.dt);
+    bool cancelled = false;
+    for (int i = 0; i < n; ++i) {
+        s.world->Step(s.dt);
+        if (s.Info().fallPhase == FallPhase::GetUp && s.Info().fallPhaseTime > 0.5f) {
+            s.c.ApplyImpact({0, 0, 3.0f * 75.0f}, s.c.GetBodyPartTransform(BodyPart::Chest).position);
+            s.Run(0.1f);
+            cancelled = s.Info().fallPhase == FallPhase::Down;
+            break;
+        }
+    }
+    CHECK(cancelled);
+}
+
+TEST_CASE("Scenario: shot in the right arm -> flinches and covers it, does not shuffle around") {
+    Scenario s;
+    s.Run(1.0f);
+    Vec3 start = s.Pelvis();
+    Shoot(s, BodyPart::RightLowerArm, 40.0f);
+    int steps = 0;
+    bool prev = false;
+    int n = static_cast<int>(5.0f / s.dt);
+    for (int i = 0; i < n; ++i) {
+        s.world->Step(s.dt);
+        bool now = s.Info().stepping[0] || s.Info().stepping[1];
+        if (now && !prev) ++steps;
+        prev = now;
+    }
+    CHECK(steps <= 3);
+    CHECK(Length(Horizontal(s.Pelvis() - start)) < 0.4f);
+    CHECK(s.Upright());
+    CHECK(Contains(s.Info().reason, "cradle the right arm"));
+}
+
+TEST_CASE("Scenario: a crowd of characters stands side by side and each reacts on its own") {
+    Scenario s;
+    std::vector<Character> crowd;
+    for (int i = 1; i <= 9; ++i) {
+        CharacterDesc d = CharacterDesc::DefaultHumanoid();
+        d.spawn.position = {0.1f * static_cast<float>(i % 3), 0, -1.4f * static_cast<float>(i)};
+        crowd.push_back(s.world->CreateCharacter(d));
+    }
+    s.Run(3.0f);
+    for (auto& c : crowd) CHECK(c.GetDebugInfo().control == doctest::Approx(1.0f));
+    for (auto& c : crowd) CHECK(c.GetBodyPartTransform(BodyPart::Pelvis).position.y > 0.85f);
+    // Knock the third one over; the others stay up.
+    crowd[2].ApplyImpact({0, 0, -12.0f * 75.0f}, crowd[2].GetBodyPartTransform(BodyPart::LeftLowerLeg).position);
+    s.Run(1.0f);
+    CHECK(crowd[2].GetBodyPartTransform(BodyPart::Pelvis).position.y < 0.6f);
+    CHECK(crowd[8].GetBodyPartTransform(BodyPart::Pelvis).position.y > 0.85f);
+}

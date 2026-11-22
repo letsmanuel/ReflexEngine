@@ -190,15 +190,18 @@ TEST_CASE("Behavior: stumble recovery requests a step when the capture point lea
     CHECK(d.targets.jointOffset[BodyPart::LeftUpperArm].z > 0.2f); // arms out for balance
 }
 
-TEST_CASE("Behavior: break fall when tipping over while still conscious") {
+TEST_CASE("Behavior: past the lean point the character commits to the fall and reaches out") {
     Scene s;
+    s.body.fallPhase = FallPhase::Tipping;
     s.body.tilt = 1.1f;
     s.body.supportMargin = 0.4f;
     s.body.tiltDirection = {0, 0, 1};
     const Decision& d = s.Think();
-    REQUIRE(Has(d, "BreakFall"));
+    REQUIRE(Has(d, "KnockedDown"));
     CHECK(d.targets.breakFall);
+    CHECK(d.targets.assistScale < 0.1f); // no more balance help: it cannot recover by itself
     CHECK(d.targets.jointOffset[BodyPart::LeftUpperArm].x < -0.3f);
+    CHECK(Contains(d.reason, "point of no return"));
 }
 
 TEST_CASE("Behavior: behaviours can be disabled, removed and added") {
@@ -250,10 +253,6 @@ TEST_CASE("Behavior: a bullet in the chest incapacitates: sink to the ground, ne
     const Decision& later = s.Think();
     CHECK(later.targets.assistScale < 0.01f);
     CHECK(later.targets.groundPose > 0.9f);
-    // Falling over does not make a BreakFall (which would restore the assist) win.
-    s.body.tilt = 1.2f;
-    s.body.supportMargin = 0.5f;
-    CHECK_FALSE(Has(s.Think(), "BreakFall"));
 }
 
 TEST_CASE("Behavior: incapacitated on the back -> struggles; face down -> curls up and crawls") {
@@ -273,16 +272,32 @@ TEST_CASE("Behavior: incapacitated on the back -> struggles; face down -> curls 
     CHECK_FALSE(front.targets.struggle);
 }
 
-TEST_CASE("Behavior: a healthy character that ends up lying down stays down, protecting itself") {
+TEST_CASE("Behavior: down phase flails, get-up phase blends back to standing") {
     Scene s;
     s.body.lying = true;
-    s.body.supine = false;
-    s.body.lyingTime = 1.0f;
-    const Decision& d = s.Think();
-    REQUIRE(Has(d, "KnockedDown"));
-    CHECK(d.targets.crawl);
-    CHECK(d.targets.assistScale < 0.01f); // no balance help: it does not pop back up
-    CHECK(Contains(d.reason, "knocked down"));
-    s.body.lyingTime = 0.1f; // only just went down: still reacting to the fall
-    CHECK_FALSE(Has(s.Think(), "KnockedDown"));
+    s.body.fallPhase = FallPhase::Down;
+    s.body.phaseTime = 0.5f;
+    s.body.phaseDuration = 1.5f;
+    const Decision& down = s.Think();
+    REQUIRE(Has(down, "KnockedDown"));
+    CHECK(down.targets.struggle);
+    CHECK(down.targets.assistScale < 0.01f); // no balance help: it does not pop back up
+    CHECK(down.targets.groundPose > 0.9f);
+    CHECK(Contains(down.reason, "flailing"));
+
+    s.body.fallPhase = FallPhase::GetUp;
+    s.body.phaseDuration = 2.4f;
+    s.body.phaseTime = 0.1f;
+    float earlyGround = 0, earlyAssist = 0;
+    {
+        const Decision& e = s.Think();
+        earlyGround = e.targets.groundPose;
+        earlyAssist = e.targets.assistScale;
+    }
+    s.body.phaseTime = 1.8f;
+    const Decision& late = s.Think();
+    CHECK(earlyGround > late.targets.groundPose);
+    CHECK(earlyAssist < late.targets.assistScale);
+    CHECK(late.targets.assistScale > 0.2f);
+    CHECK(Contains(late.reason, "getting up"));
 }
