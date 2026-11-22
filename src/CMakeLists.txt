@@ -7,6 +7,7 @@ add_library(reflex::reflex ALIAS reflex)
 
 target_sources(reflex PRIVATE
     types.cpp
+    injury.cpp
     backend/jolt_backend.cpp)
 
 target_include_directories(reflex PUBLIC
