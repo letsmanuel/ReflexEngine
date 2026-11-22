@@ -252,6 +252,7 @@ void Character::Impl::ResetState() {
     prevTargets = ReactionTargets{};
     effLean = 0;
     smoothedMoveSpeed = 0;
+    lyingTime = 0;
     smoothedMoveDir = Vec3{};
     for (auto& v : smoothedOffset.v) v = Vec3{};
 }

@@ -71,6 +71,7 @@ struct Character::Impl {
     Vec3 smoothedMoveDir;
     PerPart<Vec3> smoothedOffset;
     float sLimp = 0.0f;
+    float lyingTime = 0.0f;
     CharacterDebugInfo debug;
 
     void Build(IPhysicsBackend* be, std::uint32_t charId, const CharacterDesc& d);

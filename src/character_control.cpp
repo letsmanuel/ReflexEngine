@@ -147,6 +147,11 @@ void Character::Impl::Tick(float dt) {
     float tilt = std::max(comTilt, pelvisTilt);
     Vec3 tiltDir = Normalize(pelvisTilt > comTilt ? Horizontal(pelvisUp) : comOffset, fwdP);
 
+    // Lying on the ground? (chest close to the floor) and on the back (chest front pointing up)
+    const bool lying = (chest.transform.position.y - groundRef) < 0.5f * s;
+    const bool supine = chest.transform.rotation.Rotate({0, 0, 1}).y > 0.4f;
+    lyingTime = lying ? lyingTime + dt : 0.0f;
+
     // ---- 2. Assess + decide -----------------------------------------------------------------------------
     BodyStateSummary sum;
     sum.com = com;
@@ -162,6 +167,9 @@ void Character::Impl::Tick(float dt) {
     sum.speed = Length(Horizontal(comVel));
     sum.heading = headingActual;
     sum.position = pel.transform.position;
+    sum.lying = lying;
+    sum.supine = supine;
+    sum.lyingTime = lyingTime;
 
     Transform frame{pel.transform.position, headingActual};
     ThreatPicture picture = threat.Evaluate(frame, st[Index(BodyPart::Head)].transform.position);
@@ -181,7 +189,9 @@ void Character::Impl::Tick(float dt) {
     sTurn += (T.turnYaw - sTurn) * ExpBlend(dt, 6.0f);
     Vec3 leanTarget = T.lean > 0.0f ? Normalize(T.leanDirection, {0, 0, 1}) * T.lean : Vec3{};
     sLean += (leanTarget - sLean) * ExpBlend(dt, 7.0f);
-    Vec3 moveVelTarget = T.moveDirection * (T.moveSpeed * T.speedLimit * kWalkSpeed * s);
+    // Never run ahead of the feet: the faster the capture point leaves the support polygon, the slower we ask to go.
+    const float overreach = Saturate(margin / 0.10f);
+    Vec3 moveVelTarget = T.moveDirection * (T.moveSpeed * T.speedLimit * kWalkSpeed * s * (1.0f - overreach));
     sMoveVel += (moveVelTarget - sMoveVel) * ExpBlend(dt, 3.0f);
     for (int i = 0; i < kBodyPartCount; ++i) {
         BodyPart p = static_cast<BodyPart>(i);
@@ -216,7 +226,7 @@ void Character::Impl::Tick(float dt) {
         }
     }
     const bool canStep = anyContact && control > 0.12f && stepCooldown <= 0.0f && !anySwing &&
-                         leg[0].contact && leg[1].contact && T.collapse < 0.5f;
+                         leg[0].contact && leg[1].contact && T.collapse < 0.5f && T.groundPose < 0.3f;
     const float stepThreshold = T.wantStep ? -0.045f : -0.015f;
     if (canStep && margin > stepThreshold && animW < 0.99f) {
         // Choose the swing leg: the step target for each candidate, penalising leaning on a weak stance leg.
@@ -335,7 +345,8 @@ void Character::Impl::Tick(float dt) {
 
     const Quat qPel = pel.transform.rotation;
     Quat relSpine = (qPel.Conjugate() * chestDes).Normalized();
-    Quat half = Slerp(Quat::Identity(), relSpine, 0.5f);
+    const float gp = Saturate(T.groundPose);
+    Quat half = Slerp(Slerp(Quat::Identity(), relSpine, 0.5f), Quat::Identity(), gp);
     delta[BodyPart::Spine] = Quat::FromRotationVector(smoothedOffset[BodyPart::Spine]) * half;
     delta[BodyPart::Chest] = Quat::FromRotationVector(smoothedOffset[BodyPart::Chest]) * half;
 
@@ -343,10 +354,10 @@ void Character::Impl::Tick(float dt) {
         const Quat qChest = chest.transform.rotation;
         Quat headDes = Slerp(yawQ, chestDes, 0.4f);
         Quat relNeck = (qChest.Conjugate() * headDes).Normalized();
-        delta[BodyPart::Neck] = Quat::FromRotationVector(smoothedOffset[BodyPart::Neck]) * Slerp(Quat::Identity(), relNeck, 0.5f);
+        delta[BodyPart::Neck] = Quat::FromRotationVector(smoothedOffset[BodyPart::Neck]) * Slerp(Quat::Identity(), relNeck, 0.5f * (1.0f - gp));
         const Quat qNeck = st[Index(BodyPart::Neck)].transform.rotation;
         Quat relHead = (qNeck.Conjugate() * headDes).Normalized();
-        delta[BodyPart::Head] = Quat::FromRotationVector(smoothedOffset[BodyPart::Head]) * Slerp(Quat::Identity(), relHead, 0.7f);
+        delta[BodyPart::Head] = Quat::FromRotationVector(smoothedOffset[BodyPart::Head]) * Slerp(Quat::Identity(), relHead, 0.7f * (1.0f - gp));
     }
 
     for (Side sd : {Side::Left, Side::Right}) {
@@ -378,6 +389,45 @@ void Character::Impl::Tick(float dt) {
             const Quat qShin = st[Index(LowerLeg(sd))].transform.rotation;
             Quat footDes = yawQ;
             delta[Foot(sd)] = (qShin.Conjugate() * footDes).Normalized();
+        }
+    }
+
+    // On the ground: legs curl up instead of reaching for the floor, with crawling or struggling motion.
+    if (gp > 0.0f) {
+        const float phase = time * 2.6f;
+        for (Side sd : {Side::Left, Side::Right}) {
+            const float sg = SideSign(sd);
+            const float off = sd == Side::Left ? 0.0f : kPi;
+            float flex = 1.1f, knee = 1.8f;
+            if (T.struggle) {
+                flex = 1.0f + 0.45f * std::sin(phase * 1.3f + off);
+                knee = 1.5f + 0.5f * std::sin(phase * 1.3f + off + 1.2f);
+            } else if (T.crawl) {
+                flex = 1.0f + 0.30f * std::sin(phase + off);
+                knee = 1.8f + 0.30f * std::sin(phase + off + kPi);
+            }
+            Quat hipPose = Quat::FromRotationVector(Vec3{-flex, 0, sg * 0.15f});
+            delta[UpperLeg(sd)] = Slerp(delta[UpperLeg(sd)], hipPose, gp);
+            delta[LowerLeg(sd)] = Slerp(delta[LowerLeg(sd)], Quat::FromAxisAngle({1, 0, 0}, knee), gp);
+            delta[Foot(sd)] = Slerp(delta[Foot(sd)], Quat::Identity(), gp);
+        }
+    }
+    if (T.struggle) {
+        // Trying to sit up: the torso lifts a little then falls back; arms push at the floor. Muscles are too
+        // weak (see Incapacitated) so the body never gets up.
+        const float phase = time * 2.6f;
+        float pulse = std::max(0.0f, std::sin(phase * 0.5f));
+        delta[BodyPart::Spine] = Quat::FromRotationVector(Vec3{0.3f * pulse, 0, 0}) * delta[BodyPart::Spine];
+        delta[BodyPart::Chest] = Quat::FromRotationVector(Vec3{0.3f * pulse, 0, 0}) * delta[BodyPart::Chest];
+        for (Side sd : {Side::Left, Side::Right}) {
+            float off = sd == Side::Left ? 0.0f : 1.7f;
+            delta[UpperArm(sd)] = Quat::FromRotationVector(Vec3{0.6f * std::sin(phase * 1.1f + off), 0, SideSign(sd) * 0.4f * std::sin(phase + off)}) * delta[UpperArm(sd)];
+        }
+    } else if (T.crawl) {
+        const float phase = time * 2.6f;
+        for (Side sd : {Side::Left, Side::Right}) {
+            float off = sd == Side::Left ? 0.0f : kPi;
+            delta[UpperArm(sd)] = Quat::FromRotationVector(Vec3{0.35f * std::sin(phase + off + kPi), 0, 0}) * delta[UpperArm(sd)];
         }
     }
 
