@@ -46,6 +46,8 @@ public:
     void ApplyDamage(BodyPart part, float damage);
     /// Advance the model: pain/shock decay, bleeding, consciousness dynamics.
     void Update(float dt);
+    /// Add whole-body shock (0..1) without damage, e.g. from being knocked about.
+    void AddShock(float amount) { shock_ = Saturate(shock_ + amount); }
     /// Report how heavily a leg was loaded this tick (0..1) so injured legs tire out.
     void ReportLegLoad(Side side, float load, float dt);
 

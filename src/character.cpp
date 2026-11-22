@@ -24,6 +24,7 @@ CharacterDesc CharacterDesc::DefaultHumanoid(float height, float mass) {
 bool Character::IsValid() const { return impl_ && impl_->backend != nullptr; }
 void Character::SetAnimationPose(const Pose& pose) { impl_->SetAnimationPose(pose); }
 void Character::ApplyHit(const HitEvent& hit) { impl_->ApplyHit(hit); }
+void Character::ApplyImpact(const Vec3& i, const Vec3& p) { impl_->ApplyImpact(i, p); }
 void Character::ReportNearMiss(const NearMissEvent& miss) { impl_->ReportNearMiss(miss); }
 void Character::SetGlobalAuthority(float v, float t) { impl_->authority.SetGlobal(v, t); }
 void Character::SetAuthority(BodyPart p, float v, float t) { impl_->authority.SetPart(p, v, t); }
@@ -199,6 +200,7 @@ void Character::Impl::Build(IPhysicsBackend* be, std::uint32_t charId, const Cha
         jd.maxAngle = spec.maxA;
         jd.swingNormal = spec.swingA;
         jd.swingPlane = spec.swingB;
+        jd.frictionTorque = tables::FrictionFor(p);
         pd.joint = backend->CreateJoint(jd);
     }
     // --- Self collision filtering ---
@@ -253,6 +255,7 @@ void Character::Impl::ResetState() {
     effLean = 0;
     smoothedMoveSpeed = 0;
     lyingTime = 0;
+    downHold = 0;
     smoothedMoveDir = Vec3{};
     for (auto& v : smoothedOffset.v) v = Vec3{};
 }
@@ -286,6 +289,26 @@ void Character::Impl::ApplyHit(const HitEvent& hit) {
         imp = ClampLength(imp, limit);
         backend->AddImpulse(pd.body, imp, hit.point);
     }
+}
+
+void Character::Impl::ApplyImpact(const Vec3& impulse, const Vec3& point) {
+    const float speed = Length(impulse) / totalMass;
+    // 80% of the blow moves the whole body, 20% is delivered at the point of contact to spin it.
+    const Vec3 shared = impulse * 0.8f;
+    for (int i = 0; i < kBodyPartCount; ++i) {
+        BodyState st = backend->GetBodyState(parts[i].body);
+        backend->AddImpulse(parts[i].body, shared * (parts[i].mass / totalMass), st.transform.position);
+    }
+    BodyState chest = backend->GetBodyState(parts[Index(BodyPart::Chest)].body);
+    backend->AddImpulse(parts[Index(BodyPart::Chest)].body, impulse * 0.2f, point);
+    injury.AddShock(Saturate(speed / 40.0f) * 0.3f);
+    HitEvent h;
+    h.bodyPart = BodyPart::Chest;
+    h.point = point;
+    h.direction = Normalize(impulse, {0, 0, 1});
+    h.damage = 0.0f;
+    threat.RegisterHit(h);
+    (void)chest;
 }
 
 void Character::Impl::ReportNearMiss(const NearMissEvent& miss) {

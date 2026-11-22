@@ -72,6 +72,7 @@ struct Character::Impl {
     PerPart<Vec3> smoothedOffset;
     float sLimp = 0.0f;
     float lyingTime = 0.0f;
+    float downHold = 0.0f;
     CharacterDebugInfo debug;
 
     void Build(IPhysicsBackend* be, std::uint32_t charId, const CharacterDesc& d);
@@ -80,6 +81,7 @@ struct Character::Impl {
     void Teleport(const Transform& t);
     void ApplyHit(const HitEvent& hit);
     void ReportNearMiss(const NearMissEvent& miss);
+    void ApplyImpact(const Vec3& impulse, const Vec3& worldPoint);
     void SetAnimationPose(const Pose& pose);
     bool RayCastParts(const Vec3& origin, const Vec3& dir, float maxDist, BodyPart& part, Vec3& point,
                       float& dist) const;

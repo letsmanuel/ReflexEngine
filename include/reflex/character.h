@@ -80,6 +80,9 @@ public:
     void SetAnimationPose(const Pose& pose);
     /// A projectile struck the character. Applies an impulse, damage and updates the threat picture.
     void ApplyHit(const HitEvent& hit);
+    /// A large non-penetrating blow (explosion, thrown object, vehicle): `impulse` in N*s is shared by the whole body
+    /// (centre of mass velocity change = impulse / mass) with extra spin where it lands. Adds shock but no wound.
+    void ApplyImpact(const Vec3& impulse, const Vec3& worldPoint);
     /// A projectile passed close to the character without hitting.
     void ReportNearMiss(const NearMissEvent& miss);
 
