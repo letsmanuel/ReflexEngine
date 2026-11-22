@@ -3,6 +3,7 @@
 /// Humanoid body-part model shared by every module.
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "reflex/export.h"
@@ -90,8 +91,8 @@ REFLEX_API const char* BodyPartName(BodyPart p);
 template <typename T>
 struct PerPart {
     std::array<T, kBodyPartCount> v{};
-    T& operator[](BodyPart p) { return v[static_cast<size_t>(p)]; }
-    const T& operator[](BodyPart p) const { return v[static_cast<size_t>(p)]; }
+    T& operator[](BodyPart p) { return v[static_cast<std::size_t>(p)]; }
+    const T& operator[](BodyPart p) const { return v[static_cast<std::size_t>(p)]; }
     void Fill(const T& value) { v.fill(value); }
 };
 
