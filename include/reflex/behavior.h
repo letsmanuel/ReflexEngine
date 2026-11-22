@@ -115,6 +115,8 @@ public:
     /// TurnAndLeanAway, ProtectHead, ProtectWound, KnockedDown (tipping, down, get up), Collapse, Incapacitated.
     DecisionLayer();
     ~DecisionLayer();
+    DecisionLayer(const DecisionLayer&) = delete;
+    DecisionLayer& operator=(const DecisionLayer&) = delete;
 
     void AddBehavior(std::unique_ptr<Behavior> b);
     bool RemoveBehavior(const std::string& name);
