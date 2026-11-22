@@ -27,6 +27,6 @@ Behaviours score themselves; the best one per channel (locomotion, recovery, upp
 
 ## Known limitations
 - Windows (MSVC) is the supported platform. The code also builds with GCC (MinGW) and passed on macOS CI, but Linux/macOS are not maintained.
-- The demo draws a primitive humanoid, not a rigged model.
+- The skinned CesiumMan model is posed by swinging its bones to the physics bodies (no twist, no hand/foot articulation), and its short legs need a matching physics rig (`MakeHumanoidRig`).
 - Crawling is a pose with limb motion, not locomotion. The on-the-back struggle is covered by unit tests, but physically lying on the back was not reproduced in the headless simulator.
 - Tuned for flat ground only.

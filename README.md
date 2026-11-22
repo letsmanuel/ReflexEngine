@@ -2,7 +2,7 @@
 
 An open-source C++20 library for **dynamic, physics-driven character reactions**: hit reactions, balance, stumbling and self-preservation. Characters *perceive -> assess -> decide -> act* every tick, so a shot in the leg produces a limp towards cover, a bullet past the head makes them turn and lean away, a chest wound sends them to the ground curled up, and fatal damage fades control until they collapse. None of it is a canned animation: it emerges from an injury model, a balance controller and swappable behaviours. MIT licensed, no proprietary code.
 
-> Status: **v0.1 work in progress.** The demo draws a primitive humanoid, not a rigged model yet. See `docs/DECISIONS.md` for limitations.
+> Status: **v0.1.** The demo shows either a primitive figure or the CC-BY *CesiumMan* model (press `M`). See `docs/DECISIONS.md` for limitations.
 
 ![Demo: leg hit, head near miss, chest hit, leg hit, headshot](docs/demo.gif)
 
@@ -33,7 +33,7 @@ ctest --test-dir build -C Release          # unit + headless scenario tests
 ```
 Always build **Release** for the demo; Jolt is much slower in Debug.
 
-Demo controls: **left click** shoot (hit or near miss), **right drag** orbit, wheel zoom, **R** reset, **Tab** debug overlay (per-limb health/capacity/authority, sliders, behaviours + reason, COM and support polygon), **A** toggle game-animation vs procedural control.
+Demo controls: **left click** shoot (hit or near miss), **right drag** orbit, wheel zoom, **R** reset, **Tab** debug overlay (per-limb health/capacity/authority, sliders, behaviours + reason, COM and support polygon), **A** toggle game-animation vs procedural control, **M** toggle the skinned CesiumMan model, **2** Force Lab (hold LMB to charge a giant ball), **C** spawn a crowd, **X** clear it.
 
 ## API sample
 

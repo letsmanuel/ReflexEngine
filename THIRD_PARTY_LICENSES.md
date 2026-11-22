@@ -10,7 +10,11 @@ ReflexEngine itself is MIT licensed (see `LICENSE`). Dependencies are fetched by
 
 ## Assets
 
-The demo currently draws the character procedurally from its physics bodies (capsules, boxes, a sphere), so no third-party art assets are shipped. If a CC0 character model is added it will be listed here with its source URL and license.
+| Asset | License | Source | Used for |
+|---|---|---|---|
+| CesiumMan (`demo/assets/CesiumMan.glb`) | CC BY 4.0, (c) 2017 Cesium | https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CesiumMan | optional skinned character in the demo (press `M`) |
+
+CesiumMan is redistributed unmodified under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). The demo can also draw a primitive figure from the physics bodies, which needs no asset.
 
 ## Clean-room statement
 
