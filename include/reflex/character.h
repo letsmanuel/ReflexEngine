@@ -25,6 +25,7 @@
 #include "reflex/export.h"
 #include "reflex/injury.h"
 #include "reflex/math.h"
+#include "reflex/physics_backend.h"
 #include "reflex/skeleton.h"
 #include "reflex/threat.h"
 #include "reflex/types.h"
@@ -101,6 +102,8 @@ public:
     /// World transform of a body part's physics body.
     Transform GetBodyPartTransform(BodyPart part) const;
     const CharacterDebugInfo& GetDebugInfo() const;
+    /// Collision shape of a body part (for drawing the ragdoll or hit volumes).
+    ShapeDesc GetPartShape(BodyPart part) const;
 
     // ---- Utilities ------------------------------------------------------------------------------------
     /// Restore full health, authority and pose, and stand the character up at its spawn transform.

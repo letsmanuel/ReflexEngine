@@ -38,6 +38,7 @@ Transform Character::GetBodyPartTransform(BodyPart p) const {
     return impl_->backend->GetBodyState(impl_->parts[Index(p)].body).transform;
 }
 const CharacterDebugInfo& Character::GetDebugInfo() const { return impl_->debug; }
+ShapeDesc Character::GetPartShape(BodyPart p) const { return impl_->parts[Index(p)].shape; }
 void Character::Reset() { impl_->Reset(); }
 void Character::Teleport(const Transform& t) { impl_->Teleport(t); }
 bool Character::RayCastParts(const Vec3& o, const Vec3& d, float maxD, BodyPart& part, Vec3& pt, float& dist) const {
