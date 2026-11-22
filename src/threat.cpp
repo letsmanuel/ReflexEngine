@@ -25,6 +25,7 @@ void ThreatModel::RegisterNearMiss(const NearMissEvent& m) {
     miss_.distance = m.distance;
     miss_.part = m.nearestPart;
     miss_.age = 0.0f;
+    miss_.latched = false;
     Vec3 d = Horizontal(m.direction);
     if (LengthSq(d) > 1e-6f) {
         // A near miss is weaker evidence than a hit, so never overwrite fresher, stronger knowledge
@@ -36,6 +37,15 @@ void ThreatModel::RegisterNearMiss(const NearMissEvent& m) {
             memory_.confidence = 0.6f;
         }
     }
+}
+
+void ThreatModel::RegisterNearMiss(const NearMissEvent& m, const Transform& frame, const Vec3& headPosition) {
+    RegisterNearMiss(m);
+    Vec3 fwd = Normalize(Horizontal(frame.rotation.Rotate({0, 0, 1})), {0, 0, 1});
+    Quat inv = FromTo({0, 0, 1}, fwd).Conjugate();
+    Vec3 local = inv.Rotate(m.closestPoint - headPosition);
+    miss_.latched = true;
+    miss_.side = local.x >= 0.0f ? Side::Left : Side::Right;
 }
 
 void ThreatModel::Update(float dt) {
@@ -98,7 +108,7 @@ ThreatPicture ThreatModel::Evaluate(const Transform& frame, const Vec3& headPosi
             t.nearMissPart = miss_.part;
             t.nearMissProximity = Saturate(1.0f - miss_.distance / 0.8f);
             Vec3 local = inv.Rotate(miss_.closestPoint - headPosition);
-            t.nearMissSide = local.x >= 0.0f ? Side::Left : Side::Right;
+            t.nearMissSide = miss_.latched ? miss_.side : (local.x >= 0.0f ? Side::Left : Side::Right);
             t.nearMissHead = IsHeadPart(miss_.part);
             t.active = true;
             t.recency = std::max(t.recency, rec);
