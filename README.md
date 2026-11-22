@@ -33,7 +33,7 @@ ctest --test-dir build -C Release          # unit + headless scenario tests
 ```
 Always build **Release** for the demo; Jolt is much slower in Debug.
 
-Demo controls: **left click** shoot (hit or near miss), **right drag** orbit, wheel zoom, **R** reset, **Tab** debug overlay (per-limb health/capacity/authority, sliders, behaviours + reason, COM and support polygon), **A** toggle game-animation vs procedural control, **M** toggle the skinned CesiumMan model, **2** Force Lab (hold LMB to charge a giant ball), **C** spawn a crowd, **X** clear it.
+Demo controls: **left click** shoot (hit or near miss), **right drag** orbit, wheel zoom, **R** reset, **Tab** debug overlay (per-limb health/capacity/authority, sliders, behaviours + reason, COM and support polygon), **A** toggle game-animation vs procedural control, **M** toggle the skinned CesiumMan model, **2** Force Lab (hold LMB to charge a giant ball), **3** sandbox map (WASD fly camera, RMB look, Q/E down/up, Shift fast, fire balls at the NPCs), **C** spawn a crowd, **X** clear it.
 
 ## API sample
 
