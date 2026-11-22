@@ -7,6 +7,7 @@
 //
 //   reflex_demo --capture <dir> [width height]   runs a scripted shooting sequence and writes PNG frames
 
+#include <memory>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -28,6 +29,100 @@ namespace {
 
 Vector3 V(const rx::Vec3& v) { return {v.x, v.y, v.z}; }
 rx::Vec3 R(const Vector3& v) { return {v.x, v.y, v.z}; }
+
+// ---- Skinned character model (CesiumMan, CC BY 4.0, (c) 2017 Cesium) -------------------------------------------------
+// The mesh is posed from the physics bodies: each mapped bone takes its rotation from the matching body part.
+struct Skinned {
+    Model model{};
+    ModelAnimation anim{};
+    std::vector<Vector3> bindPos;   // scaled bind positions (model space)
+    std::vector<Quaternion> bindRot;
+    bool loaded = false;
+};
+
+constexpr int kModelBones = 19;
+constexpr float kModelScale = 1.75f / 1.51f; // the model is 1.51 m tall
+// CesiumMan bone index -> body part (-1 = unmapped toe bones)
+const int kBonePart[kModelBones] = {0, 1, 2, 3, 4, 5, 8, 6, 9, 7, 10, 11, 14, 12, 15, 13, 16, -1, -1};
+// swing bones aim at a child bone: bone -> child bone (-1 = rotate with the body part)
+const int kBoneChild[kModelBones] = {-1, -1, -1, -1, -1, 7, 8, 9, 10, -2, -2, 13, 14, 15, 16, -1, -1, -1, -1};
+
+bool LoadSkinned(Skinned& sk) {
+    std::string path = std::string(GetApplicationDirectory()) + "assets/CesiumMan.glb";
+    sk.model = LoadModel(path.c_str());
+    if (sk.model.meshCount < 1 || sk.model.boneCount != kModelBones || sk.model.meshes[0].animVertices == nullptr) {
+        TraceLog(LOG_WARNING, "Could not load %s, using the primitive figure", path.c_str());
+        return false;
+    }
+    for (int i = 0; i < kModelBones; ++i) {
+        sk.model.bindPose[i].translation = Vector3Scale(sk.model.bindPose[i].translation, kModelScale);
+        sk.bindPos.push_back(sk.model.bindPose[i].translation);
+        sk.bindRot.push_back(sk.model.bindPose[i].rotation);
+    }
+    Mesh& m = sk.model.meshes[0];
+    for (int i = 0; i < m.vertexCount * 3; ++i) m.vertices[i] *= kModelScale;
+    sk.anim.boneCount = kModelBones;
+    sk.anim.frameCount = 1;
+    sk.anim.bones = static_cast<BoneInfo*>(MemAlloc(kModelBones * sizeof(BoneInfo)));
+    for (int i = 0; i < kModelBones; ++i) sk.anim.bones[i] = sk.model.bones[i];
+    sk.anim.framePoses = static_cast<Transform**>(MemAlloc(sizeof(Transform*)));
+    sk.anim.framePoses[0] = static_cast<Transform*>(MemAlloc(kModelBones * sizeof(Transform)));
+    sk.loaded = true;
+    return true;
+}
+
+void FreeSkinned(Skinned& sk) {
+    if (!sk.loaded) return;
+    UnloadModelAnimation(sk.anim);
+    UnloadModel(sk.model);
+    sk.loaded = false;
+}
+
+Quaternion Q(const rx::Quat& q) { return {q.x, q.y, q.z, q.w}; }
+
+void PoseSkinned(Skinned& sk, const rx::Character& c) {
+    if (!sk.loaded) return;
+    Quaternion rot[kModelBones];
+    Vector3 pos[kModelBones];
+    Quaternion delta[kModelBones];
+    auto bodyRot = [&](int part) { return c.GetBodyPartTransform(static_cast<rx::BodyPart>(part)).rotation; };
+    for (int i = 0; i < kModelBones; ++i) {
+        int par = sk.model.bones[i].parent;
+        int part = kBonePart[i];
+        if (part >= 0) {
+            rx::Quat br = bodyRot(part);
+            if (kBoneChild[i] == -1) {
+                rot[i] = QuaternionMultiply(Q(br), sk.bindRot[i]); // follows the body part
+            } else {
+                Vector3 from;
+                if (kBoneChild[i] >= 0) from = Vector3Normalize(Vector3Subtract(sk.bindPos[kBoneChild[i]], sk.bindPos[i]));
+                else from = Vector3Normalize(Vector3Subtract(sk.bindPos[i], sk.bindPos[par])); // hand continues the forearm
+                rx::Vec3 d = br.Rotate({0, -1, 0});
+                // a touch of outward swing keeps the mesh arms clear of the torso
+                if (part == static_cast<int>(rx::BodyPart::LeftUpperArm) || part == static_cast<int>(rx::BodyPart::RightUpperArm))
+                    d = rx::Normalize(d + rx::Vec3{(part == static_cast<int>(rx::BodyPart::LeftUpperArm) ? 0.18f : -0.18f), 0, 0});
+                Quaternion swing = QuaternionFromVector3ToVector3(from, V(d));
+                rot[i] = QuaternionMultiply(swing, sk.bindRot[i]);
+            }
+        } else if (par >= 0) {
+            rot[i] = QuaternionMultiply(delta[par], sk.bindRot[i]);
+        } else {
+            rot[i] = sk.bindRot[i];
+        }
+        delta[i] = QuaternionMultiply(rot[i], QuaternionInvert(sk.bindRot[i]));
+        if (par < 0) {
+            rx::Vec3 pp = c.GetBodyPartTransform(rx::BodyPart::Pelvis).position;
+            pos[i] = {pp.x, pp.y, pp.z}; // the model pelvis sits at the physics pelvis
+        } else {
+            Vector3 off = Vector3Subtract(sk.bindPos[i], sk.bindPos[par]);
+            pos[i] = Vector3Add(pos[par], Vector3RotateByQuaternion(off, delta[par]));
+        }
+        sk.anim.framePoses[0][i].translation = pos[i];
+        sk.anim.framePoses[0][i].rotation = rot[i];
+        sk.anim.framePoses[0][i].scale = {1, 1, 1};
+    }
+    UpdateModelAnimation(sk.model, sk.anim, 0);
+}
 
 struct StaticBox {
     rx::Vec3 center, half;
@@ -60,6 +155,9 @@ struct App {
     float chargeTime = 0.0f;
     std::vector<Ball> balls;
     std::vector<rx::Character> crowd; // extra characters standing in a line behind the main one
+    bool useModel = false;            // M toggles between the skinned model and the primitive figure
+    Skinned mainSkin;
+    std::vector<std::unique_ptr<Skinned>> crowdSkin;
     std::unique_ptr<rx::IPhysicsBackend> backend;
     std::unique_ptr<rx::World> world;
     rx::Character character;
@@ -79,6 +177,29 @@ struct App {
 };
 
 App* gApp = nullptr;
+
+// Physics rig. With the skinned model the legs/lower torso follow its (shorter-legged) proportions.
+rx::CharacterDesc MakeDesc(bool model, float height) {
+    if (!model) return rx::CharacterDesc::DefaultHumanoid(height, 75.0f);
+    auto p = rx::DefaultHumanoidJointPositions(1.75f);
+    auto set = [&](rx::BodyPart part, rx::Vec3 v) { p[static_cast<size_t>(rx::Index(part))] = v; };
+    set(rx::BodyPart::Pelvis, {0, 0.787f, 0});
+    set(rx::BodyPart::Spine, {0, 0.955f, 0});
+    set(rx::BodyPart::Chest, {0, 1.10f, 0});
+    for (float sg : {1.0f, -1.0f}) {
+        bool left = sg > 0;
+        set(left ? rx::BodyPart::LeftUpperLeg : rx::BodyPart::RightUpperLeg, {0.09f * sg, 0.71f, 0});
+        set(left ? rx::BodyPart::LeftLowerLeg : rx::BodyPart::RightLowerLeg, {0.09f * sg, 0.41f, 0});
+        set(left ? rx::BodyPart::LeftFoot : rx::BodyPart::RightFoot, {0.09f * sg, 0.10f, 0});
+    }
+    rx::CharacterDesc d;
+    rx::HumanoidRig rig = rx::MakeHumanoidRig(p);
+    d.skeleton = std::move(rig.skeleton);
+    d.mapping = rig.mapping;
+    d.params.height = height;
+    d.params.mass = 75.0f;
+    return d;
+}
 
 void AddStaticBox(App& a, rx::Vec3 center, rx::Vec3 half, Color color, bool addCover = true) {
     rx::BodyDesc b;
@@ -113,7 +234,7 @@ void BuildScene(App& a, int scene) {
     }
 
     a.world = std::make_unique<rx::World>(*a.backend);
-    rx::CharacterDesc desc = rx::CharacterDesc::DefaultHumanoid(1.75f, 75.0f);
+    rx::CharacterDesc desc = MakeDesc(a.useModel, 1.75f);
     desc.spawn.position = {0, 0, 0};
     desc.spawn.rotation = rx::Quat::Identity();
     a.character = a.world->CreateCharacter(desc);
@@ -151,6 +272,9 @@ void BuildScene(App& a, int scene) {
 }
 
 void LoadScene(App& a, int scene) {
+    FreeSkinned(a.mainSkin);
+    for (auto& k : a.crowdSkin) FreeSkinned(*k);
+    a.crowdSkin.clear();
     a.crowd.clear();
     a.character = rx::Character(); // release the characters before their world goes away
     a.world.reset();
@@ -168,16 +292,24 @@ void LoadScene(App& a, int scene) {
     a.useAnimation = false;
     BuildScene(a, scene);
     for (int i = 0; i < 120; ++i) a.world->Step(1.0f / 120.0f);
+    if (a.useModel && !LoadSkinned(a.mainSkin)) a.useModel = false;
     a.camTarget = {0, 1.0f, 0};
 }
 
 // A row of characters one behind the other along the ball path: shoot a ball through them all.
 void SpawnCrowd(App& a, int count) {
+    for (auto& k : a.crowdSkin) FreeSkinned(*k);
+    a.crowdSkin.clear();
     a.crowd.clear();
     for (int i = 1; i <= count; ++i) {
-        rx::CharacterDesc d = rx::CharacterDesc::DefaultHumanoid(1.75f + 0.04f * static_cast<float>((i * 7) % 5) - 0.08f, 75.0f);
+        rx::CharacterDesc d = MakeDesc(a.useModel, 1.75f + (a.useModel ? 0.0f : 0.04f * static_cast<float>((i * 7) % 5) - 0.08f));
         d.spawn.position = {0.12f * static_cast<float>((i * 5) % 3 - 1), 0.0f, -1.5f * static_cast<float>(i)};
         a.crowd.push_back(a.world->CreateCharacter(d));
+        if (a.useModel) {
+            auto sk = std::make_unique<Skinned>();
+            LoadSkinned(*sk);
+            a.crowdSkin.push_back(std::move(sk));
+        }
     }
     for (int i = 0; i < 120; ++i) a.world->Step(1.0f / 120.0f);
 }
@@ -232,7 +364,7 @@ void ShootFromCamera(App& a, Vector2 mouse) {
 }
 
 // ---- Force lab: hold to charge, release to launch a giant ball -------------------------------------------------
-float ChargeFraction(const App& a) { return rx::Saturate(a.chargeTime / 2.0f); }
+float ChargeFraction(const App& a) { return rx::Saturate(a.chargeTime / 0.7f); }
 float BallSpeed(float charge) { return 6.0f + 36.0f * charge; }
 
 void FireBall(App& a, Vector2 mouse, float charge) {
@@ -356,8 +488,13 @@ void DrawScene(const App& a) {
         DrawCubeWires(V(b.center), b.half.x * 2, b.half.y * 2, b.half.z * 2, Fade(BLACK, 0.35f));
     }
     DrawGrid(60, 1.0f);
-    DrawCharacter(a, a.character, true);
-    for (const rx::Character& c : a.crowd) DrawCharacter(a, c, false);
+    if (a.useModel && a.mainSkin.loaded) {
+        DrawModel(a.mainSkin.model, {0, 0, 0}, 1.0f, WHITE);
+        for (const auto& k : a.crowdSkin) DrawModel(k->model, {0, 0, 0}, 1.0f, WHITE);
+    } else {
+        DrawCharacter(a, a.character, true);
+        for (const rx::Character& c : a.crowd) DrawCharacter(a, c, false);
+    }
     for (const Ball& b : a.balls) {
         DrawSphere(V(b.pos), kBallRadius, Color{255, 140, 40, 255});
         DrawSphereWires(V(b.pos), kBallRadius, 12, 12, Fade(BLACK, 0.5f));
@@ -500,7 +637,7 @@ void DrawOverlay(App& a, bool interactive) {
     DrawText(active.empty() ? "behaviour: (idle)" : TextFormat("behaviour: %s", active.c_str()), 12, H - 142, 16, Color{255, 210, 90, 255});
     DrawWrapped(std::string("reason: ") + d.reason, 12, H - 118, W - 24, 15, RAYWHITE);
     if (a.scene == 1) {
-        DrawText("FORCE LAB: hold LMB to charge a giant ball, release to fire   |   C crowd   X clear   R reset   1 shooting range", 12, H - 20, 13, GRAY);
+        DrawText("FORCE LAB: hold LMB to charge a giant ball, release to fire   |   C crowd   X clear   R reset   M model   1 shooting range", 12, H - 20, 13, GRAY);
         float ch = ChargeFraction(a);
         int bw = 360, bx = W / 2 - bw / 2, by = H - 175;
         if (a.charging || ch > 0) {
@@ -508,7 +645,7 @@ void DrawOverlay(App& a, bool interactive) {
             DrawText(TextFormat("FORCE  %.0f m/s  (launch ~%.0f m/s)", BallSpeed(ch), kBallMass * BallSpeed(ch) / 75.0f), bx, by - 18, 14, ORANGE);
         }
     } else {
-        DrawText("LMB shoot   RMB orbit   wheel zoom   R reset   Tab overlay   A animation   C crowd   2 force lab", 12, H - 20, 13, GRAY);
+        DrawText("LMB shoot   RMB orbit   wheel zoom   R reset   Tab overlay   A animation   C crowd   M model   2 force lab", 12, H - 20, 13, GRAY);
     }
 }
 
@@ -551,6 +688,7 @@ void RunScript(App& a, float t, size_t& next, const std::vector<ScriptStep>& scr
 
 } // namespace
 
+
 int main(int argc, char** argv) {
     std::string captureDir;
     int width = 1280, height = 720;
@@ -578,6 +716,7 @@ int main(int argc, char** argv) {
 #endif
     App app;
     gApp = &app;
+    for (int i = 1; i < argc; ++i) if (!std::strcmp(argv[i], "--model")) app.useModel = true;
     LoadScene(app, 0);
 
     std::vector<ScriptStep> script = {{1.0f, 0}, {4.5f, 1}, {7.5f, 2}, {10.5f, 4}, {13.0f, 3}};
@@ -608,6 +747,10 @@ int main(int argc, char** argv) {
         }
         if (IsKeyPressed(KEY_TAB)) app.overlay = !app.overlay;
         if (!capture && !bench) {
+            if (IsKeyPressed(KEY_M)) {
+                app.useModel = !app.useModel;
+                LoadScene(app, app.scene);
+            }
             if (IsKeyPressed(KEY_C)) SpawnCrowd(app, 10);
             if (IsKeyPressed(KEY_X)) app.crowd.clear();
             if (IsKeyPressed(KEY_ONE) && app.scene != 0) LoadScene(app, 0);
@@ -657,6 +800,10 @@ int main(int argc, char** argv) {
         // Simulation
         app.world->Step(dt);
         UpdateBalls(app, dt);
+        if (app.useModel) {
+            PoseSkinned(app.mainSkin, app.character);
+            for (size_t i = 0; i < app.crowd.size() && i < app.crowdSkin.size(); ++i) PoseSkinned(*app.crowdSkin[i], app.crowd[i]);
+        }
         for (float& f : app.hitFlash) f = std::max(0.0f, f - dt * 2.5f);
         for (auto& m : app.markers) m.life -= dt;
         for (auto& t : app.tracers) t.life -= dt;
@@ -689,6 +836,8 @@ int main(int argc, char** argv) {
             if (scriptTime > 17.0f) break;
         }
     }
+    FreeSkinned(app.mainSkin);
+    for (auto& k : app.crowdSkin) FreeSkinned(*k);
     CloseWindow();
     return 0;
 }
