@@ -255,7 +255,10 @@ void Character::Impl::ResetState() {
     effLean = 0;
     smoothedMoveSpeed = 0;
     lyingTime = 0;
-    downHold = 0;
+    fallPhase = FallPhase::None;
+    phaseTime = phaseDuration = tipCooldown = 0;
+    impactPending = false;
+    rng = id * 2654435761u + 12345u;
     smoothedMoveDir = Vec3{};
     for (auto& v : smoothedOffset.v) v = Vec3{};
 }
@@ -279,6 +282,7 @@ void Character::Impl::Teleport(const Transform& t) {
 // Events
 // ---------------------------------------------------------------------------------------------------------
 void Character::Impl::ApplyHit(const HitEvent& hit) {
+    impactPending = true;
     injury.ApplyDamage(hit.bodyPart, hit.damage);
     threat.RegisterHit(hit);
     float impulse = hit.impulse > 0.0f ? hit.impulse : hit.mass * hit.speed;
@@ -292,15 +296,25 @@ void Character::Impl::ApplyHit(const HitEvent& hit) {
 }
 
 void Character::Impl::ApplyImpact(const Vec3& impulse, const Vec3& point) {
+    impactPending = true;
     const float speed = Length(impulse) / totalMass;
-    // 80% of the blow moves the whole body, 20% is delivered at the point of contact to spin it.
-    const Vec3 shared = impulse * 0.8f;
+    // The blow lands where the object hits: the struck parts get the biggest velocity change, the rest of the
+    // body gets about half of it and is dragged along by the joints (legs hit -> legs go first, torso follows).
+    float weight[kBodyPartCount];
+    float sum = 0;
     for (int i = 0; i < kBodyPartCount; ++i) {
-        BodyState st = backend->GetBodyState(parts[i].body);
-        backend->AddImpulse(parts[i].body, shared * (parts[i].mass / totalMass), st.transform.position);
+        Vec3 pos = backend->GetBodyState(parts[i].body).transform.position;
+        float d = Length(pos - point);
+        float falloff = 0.5f + 0.5f * std::exp(-(d * d) / (0.55f * 0.55f));
+        weight[i] = falloff;
+        sum += parts[i].mass * falloff;
     }
-    BodyState chest = backend->GetBodyState(parts[Index(BodyPart::Chest)].body);
-    backend->AddImpulse(parts[Index(BodyPart::Chest)].body, impulse * 0.2f, point);
+    for (int i = 0; i < kBodyPartCount; ++i) {
+        Vec3 pos = backend->GetBodyState(parts[i].body).transform.position;
+        float dv = Length(impulse) / sum * weight[i];
+        dv = std::min(dv, 45.0f);
+        backend->AddImpulse(parts[i].body, Normalize(impulse, {0, 0, 1}) * (dv * parts[i].mass), pos);
+    }
     injury.AddShock(Saturate(speed / 40.0f) * 0.3f);
     HitEvent h;
     h.bodyPart = BodyPart::Chest;
@@ -308,7 +322,6 @@ void Character::Impl::ApplyImpact(const Vec3& impulse, const Vec3& point) {
     h.direction = Normalize(impulse, {0, 0, 1});
     h.damage = 0.0f;
     threat.RegisterHit(h);
-    (void)chest;
 }
 
 void Character::Impl::ReportNearMiss(const NearMissEvent& miss) {

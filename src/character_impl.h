@@ -72,7 +72,15 @@ struct Character::Impl {
     PerPart<Vec3> smoothedOffset;
     float sLimp = 0.0f;
     float lyingTime = 0.0f;
-    float downHold = 0.0f;
+    FallPhase fallPhase = FallPhase::None;
+    float phaseTime = 0.0f, phaseDuration = 0.0f;
+    float tipCooldown = 0.0f;
+    bool impactPending = false;
+    std::uint32_t rng = 1;
+    float NextRandom() {
+        rng = rng * 1664525u + 1013904223u;
+        return static_cast<float>((rng >> 8) & 0xFFFF) / 65535.0f;
+    }
     CharacterDebugInfo debug;
 
     void Build(IPhysicsBackend* be, std::uint32_t charId, const CharacterDesc& d);
