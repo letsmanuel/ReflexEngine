@@ -305,41 +305,62 @@ public:
 };
 
 // ---------------------------------------------------------------------------------------------------------
+/// Shared ground behaviour: weak muscles, curled-up protective pose, crawl or struggle. `sink` (0..1) is how far
+/// the descent to the ground has progressed.
+void GroundPose(const BehaviorContext& c, float sink, ReactionTargets& o, std::string& clause, const char* cause) {
+    const float ground = c.body.lying ? 1.0f : Saturate((sink - 0.55f) / 0.45f);
+    o.assistScale *= (1.0f - sink) * (1.0f - sink);
+    o.crouch = std::max(o.crouch, sink);
+    o.groundPose = std::max(o.groundPose, ground);
+    o.collapse = std::max(o.collapse, 0.5f * sink);
+    // Curl up around the vital area, arms covering head and chest.
+    o.jointOffset[BodyPart::Spine] += Vec3{0.30f * sink, 0, 0};
+    o.jointOffset[BodyPart::Chest] += Vec3{0.30f * sink, 0, 0};
+    o.jointOffset[BodyPart::Head] += Vec3{0.30f * sink, 0, 0};
+    RaiseArms(o, 1.1f, -0.1f, 2.0f, sink);
+    // Weakened muscles: enough to hold a protective pose, never enough to stand again.
+    for (int i = 1; i < kBodyPartCount; ++i) {
+        BodyPart p = static_cast<BodyPart>(i);
+        float f = IsLegPart(p) ? 0.5f : IsArmPart(p) ? 0.55f : 0.6f;
+        if (c.body.lying && c.body.supine && (p == BodyPart::Spine || p == BodyPart::Chest)) f = 0.22f;
+        o.authorityScale[p] *= Lerp(1.0f, f, sink);
+    }
+    clause += cause;
+    if (c.body.lying && c.body.supine) {
+        o.struggle = true;
+        clause += " on the back: struggles to get up but cannot, keeps falling back down";
+    } else if (c.body.lying) {
+        o.crawl = true;
+        clause += ": curled up on the ground protecting the head and body, crawling";
+    } else {
+        clause += ": legs give out, slowly sinking to the ground, curling up to protect the body";
+    }
+}
+
 class Incapacitated final : public Behavior {
 public:
     const char* Name() const override { return "Incapacitated"; }
     Channel GetChannel() const override { return Channel::Fall; }
     float Score(const BehaviorContext& c) const override { return c.injury.IsIncapacitated() ? 0.7f : 0.0f; }
     void Apply(const BehaviorContext& c, float, ReactionTargets& o, std::string& clause) const override {
-        const float t = c.injury.IncapacitatedTime();
         // Sinking: the assist fades over ~2 s so the body slowly goes down instead of dropping.
-        const float sink = Saturate(t / 2.0f);
-        const float ground = c.body.lying ? 1.0f : Saturate((sink - 0.55f) / 0.45f);
-        o.assistScale *= (1.0f - sink) * (1.0f - sink);
-        o.crouch = std::max(o.crouch, sink);
-        o.groundPose = std::max(o.groundPose, ground);
-        o.collapse = std::max(o.collapse, 0.5f * sink);
-        // Curl up around the wound, arms covering head and chest.
-        o.jointOffset[BodyPart::Spine] += Vec3{0.30f * sink, 0, 0};
-        o.jointOffset[BodyPart::Chest] += Vec3{0.30f * sink, 0, 0};
-        o.jointOffset[BodyPart::Head] += Vec3{0.30f * sink, 0, 0};
-        RaiseArms(o, 1.1f, -0.1f, 2.0f, sink);
-        // Weakened muscles: enough to hold a protective pose, never enough to stand again.
-        for (int i = 1; i < kBodyPartCount; ++i) {
-            BodyPart p = static_cast<BodyPart>(i);
-            float f = IsLegPart(p) ? 0.5f : IsArmPart(p) ? 0.55f : 0.6f;
-            if (c.body.lying && c.body.supine && (p == BodyPart::Spine || p == BodyPart::Chest)) f = 0.22f;
-            o.authorityScale[p] *= Lerp(1.0f, f, sink);
-        }
-        if (c.body.lying && c.body.supine) {
-            o.struggle = true;
-            clause += "incapacitated, on the back: struggles to get up but cannot, keeps falling back down";
-        } else if (c.body.lying) {
-            o.crawl = true;
-            clause += "incapacitated: curled up on the ground protecting the head and wound, crawling";
-        } else {
-            clause += "incapacitated: legs give out, slowly sinking to the ground, curling up to protect the wound";
-        }
+        GroundPose(c, Saturate(c.injury.IncapacitatedTime() / 2.0f), o, clause, "incapacitated");
+    }
+};
+
+/// Knocked off its feet (thrown, shoved, fell over) and now lying down: it stays down protecting itself.
+class KnockedDown final : public Behavior {
+public:
+    const char* Name() const override { return "KnockedDown"; }
+    Channel GetChannel() const override { return Channel::Fall; }
+    float Score(const BehaviorContext& c) const override {
+        if (c.injury.IsDead() || c.injury.IsIncapacitated()) return 0.0f;
+        return (c.body.lying && c.body.lyingTime > 0.4f) || c.body.downHold > 0.0f ? 0.65f : 0.0f;
+    }
+    void Apply(const BehaviorContext& c, float, ReactionTargets& o, std::string& clause) const override {
+        // Fully down while lying; once up, the descent state fades out over the last second (a gradual get-up).
+        float sink = c.body.lying ? 1.0f : Saturate(c.body.downHold);
+        GroundPose(c, sink, o, clause, "knocked down");
     }
 };
 
@@ -393,6 +414,7 @@ DecisionLayer::DecisionLayer() {
     AddBehavior(std::make_unique<BreakFall>());
     AddBehavior(std::make_unique<Collapse>());
     AddBehavior(std::make_unique<Incapacitated>());
+    AddBehavior(std::make_unique<KnockedDown>());
 }
 
 DecisionLayer::~DecisionLayer() = default;

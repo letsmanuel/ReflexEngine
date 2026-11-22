@@ -35,6 +35,7 @@ struct BodyStateSummary {
     bool lying = false;          ///< body is down on the ground
     bool supine = false;         ///< lying on the back
     float lyingTime = 0.0f;      ///< seconds spent lying
+    float downHold = 0.0f;       ///< seconds a knocked-down character is still kept down (counts down once up)
 };
 
 struct BehaviorContext {
