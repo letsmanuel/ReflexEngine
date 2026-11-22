@@ -10,6 +10,7 @@ target_sources(reflex PRIVATE
     injury.cpp
     authority.cpp
     balance.cpp
+    threat.cpp
     backend/jolt_backend.cpp)
 
 target_include_directories(reflex PUBLIC
