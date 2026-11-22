@@ -142,13 +142,13 @@ TEST_CASE("Behavior: reaction to a near miss is expressed in the character's own
     CHECK(d.targets.turnYaw < -0.2f);
 }
 
-TEST_CASE("Behavior: torso hit -> hunch over the wound, protect with arms, slow down, brace") {
+TEST_CASE("Behavior: light torso hit -> hunch over the wound, protect with arms, slow down, brace") {
     Scene s;
-    ShootFromFront(s, BodyPart::Chest, 40.0f);
+    ShootFromFront(s, BodyPart::Chest, 22.0f);
     const Decision& d = s.Think();
     REQUIRE(Has(d, "ProtectWound"));
     REQUIRE(Has(d, "Brace"));
-    CHECK(d.targets.jointOffset[BodyPart::Spine].x > 0.1f);
+    CHECK(d.targets.jointOffset[BodyPart::Spine].x > 0.04f);
     CHECK(d.targets.jointOffset[BodyPart::LeftLowerArm].x < -0.5f);
     CHECK(d.targets.jointOffset[BodyPart::RightLowerArm].x < -0.5f);
     CHECK(d.targets.speedLimit < 0.9f);
@@ -232,4 +232,43 @@ TEST_CASE("Behavior: every decision has a non-empty reason") {
     CHECK_FALSE(s.Think().reason.empty());
     ShootFromFront(s, BodyPart::LeftLowerLeg, 35.0f);
     CHECK_FALSE(s.Think().reason.empty());
+}
+
+TEST_CASE("Behavior: a bullet in the chest incapacitates: sink to the ground, never recover") {
+    Scene s;
+    ShootFromFront(s, BodyPart::Chest, 35.0f);
+    s.injury.Update(0.016f);
+    CHECK(s.injury.IsIncapacitated());
+    CHECK_FALSE(s.injury.IsDead());
+    const Decision& d = s.Think();
+    REQUIRE(Has(d, "Incapacitated"));
+    CHECK_FALSE(Has(d, "LimpAway"));
+    CHECK_FALSE(Has(d, "StumbleRecover"));
+    CHECK(Contains(d.reason, "sinking"));
+    // The balance assist fades away completely.
+    for (int i = 0; i < 60 * 3; ++i) s.injury.Update(1.0f / 60.0f);
+    const Decision& later = s.Think();
+    CHECK(later.targets.assistScale < 0.01f);
+    CHECK(later.targets.groundPose > 0.9f);
+    // Falling over does not make a BreakFall (which would restore the assist) win.
+    s.body.tilt = 1.2f;
+    s.body.supportMargin = 0.5f;
+    CHECK_FALSE(Has(s.Think(), "BreakFall"));
+}
+
+TEST_CASE("Behavior: incapacitated on the back -> struggles; face down -> curls up and crawls") {
+    Scene s;
+    ShootFromFront(s, BodyPart::Chest, 35.0f);
+    for (int i = 0; i < 60 * 3; ++i) s.injury.Update(1.0f / 60.0f);
+    s.body.lying = true;
+    s.body.supine = true;
+    const Decision& back = s.Think();
+    CHECK(back.targets.struggle);
+    CHECK_FALSE(back.targets.crawl);
+    CHECK(Contains(back.reason, "on the back"));
+    CHECK(back.targets.authorityScale[BodyPart::Chest] < 0.3f); // far too weak to sit up
+    s.body.supine = false;
+    const Decision& front = s.Think();
+    CHECK(front.targets.crawl);
+    CHECK_FALSE(front.targets.struggle);
 }

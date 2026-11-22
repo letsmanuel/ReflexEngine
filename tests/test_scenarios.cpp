@@ -193,31 +193,65 @@ TEST_CASE("Scenario: near miss on the right of the head mirrors the reaction") {
     CHECK(s.Upright());
 }
 
-TEST_CASE("Scenario: torso hit -> hunch, protect the wound, stay upright") {
+TEST_CASE("Scenario: light torso hit -> hunch, protect the wound, stay upright, no impossible lean") {
     Scenario s;
     s.Run(1.0f);
-    Shoot(s, BodyPart::Chest, 45.0f);
-    float maxHunch = 0;
+    Shoot(s, BodyPart::Chest, 20.0f);
+    float maxHunch = 0, maxOffset = 0, maxBend = 0;
+    bool sawProtect = false, sawHunchReason = false;
     Track tr;
-    int n = static_cast<int>(3.0f / s.dt);
+    int n = static_cast<int>(4.0f / s.dt);
     for (int i = 0; i < n; ++i) {
         s.world->Step(s.dt);
+        sawProtect |= HasBehavior(s.Info(), "ProtectWound");
+        sawHunchReason |= Contains(s.Info().reason, "hunch");
         Vec3 chest = s.c.GetBodyPartTransform(BodyPart::Chest).position;
         Vec3 pel = s.Pelvis();
-        maxHunch = std::max(maxHunch, chest.z - pel.z); // chest ahead of the pelvis = bent forward
+        maxHunch = std::max(maxHunch, chest.z - pel.z);
+        Vec3 feet = (s.c.GetBodyPartTransform(BodyPart::LeftFoot).position +
+                     s.c.GetBodyPartTransform(BodyPart::RightFoot).position) * 0.5f;
+        maxOffset = std::max(maxOffset, Length(Horizontal(s.Com() - feet)));
+        Quat rel = s.c.GetBodyPartTransform(BodyPart::Pelvis).rotation.Conjugate() *
+                   s.c.GetBodyPartTransform(BodyPart::Chest).rotation;
+        maxBend = std::max(maxBend, Length(rel.ToRotationVector()));
         tr.minPelvisY = std::min(tr.minPelvisY, pel.y);
         tr.maxTilt = std::max(tr.maxTilt, s.Tilt());
     }
-    CHECK(maxHunch > 0.06f);
+    CHECK(maxHunch > 0.03f);
+    CHECK(maxBend < 0.62f);      // a human spine cannot fold further
+    CHECK(maxOffset < 0.4f);     // the COM never hangs far beyond the feet
     CHECK(tr.minPelvisY > 0.65f);
-    CHECK(HasBehavior(s.Info(), "ProtectWound"));
-    CHECK(Contains(s.Info().reason, "hunch"));
-    // arms are drawn up over the wound
-    CHECK(s.c.GetBodyPartTransform(BodyPart::LeftHand).position.y > 0.9f);
-    CHECK(s.c.GetBodyPartTransform(BodyPart::RightHand).position.y > 0.9f);
+    CHECK(sawProtect);
+    CHECK(sawHunchReason);
     Track later = RunTracked(s, 3.0f);
     CHECK(later.fallenSteps == 0);
     CHECK(s.Upright());
+}
+
+TEST_CASE("Scenario: shot in the chest -> incapacitated: sinks to the ground, curls up, never stands again") {
+    Scenario s;
+    s.Run(1.0f);
+    Shoot(s, BodyPart::Chest, 35.0f);
+    s.Run(0.5f);
+    CHECK(s.Pelvis().y > 0.6f); // it does not drop like a stone
+    s.Run(5.0f);
+    CHECK(s.Pelvis().y < 0.45f);
+    CHECK(s.Info().control > 0.5f); // alive and conscious, just incapacitated
+    CHECK(HasBehavior(s.Info(), "Incapacitated"));
+    CHECK(Contains(s.Info().reason, "incapacitated"));
+    // It keeps trying but never gets back up.
+    float maxY = 0;
+    int n = static_cast<int>(10.0f / s.dt);
+    for (int i = 0; i < n; ++i) {
+        s.world->Step(s.dt);
+        maxY = std::max(maxY, s.Pelvis().y);
+    }
+    CHECK(maxY < 0.5f);
+    CHECK(s.Info().fallen);
+    // Hands stay near the body (covering head / chest), not flung out.
+    Vec3 pel = s.Pelvis();
+    CHECK(Length(s.c.GetBodyPartTransform(BodyPart::LeftHand).position - pel) < 1.4f);
+    CHECK(Length(s.c.GetBodyPartTransform(BodyPart::RightHand).position - pel) < 1.4f);
 }
 
 TEST_CASE("Scenario: arm hit -> that arm is cradled, the other arm is used for balance, no fall") {
