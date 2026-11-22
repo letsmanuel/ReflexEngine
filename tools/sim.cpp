@@ -1,5 +1,6 @@
 // Debug tool: runs a headless scenario and prints a time series.
 //   reflex_sim stand|legright|legleft|headleft|torso|armr|fatal|push|walk [seconds]
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -25,6 +26,14 @@ int main(int argc, char** argv) {
     float seconds = argc > 2 ? static_cast<float>(std::atof(argv[2])) : 4.0f;
     Scenario s;
     s.Run(1.0f); // settle
+    if (mode == "bench") {
+        auto t0 = std::chrono::steady_clock::now();
+        const int n = 1200;
+        for (int i = 0; i < n; ++i) s.world->Step(s.dt);
+        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        std::printf("%.3f ms per 1/120 s tick -> %.2f ms of engine+physics per 60 fps frame\n", ms / n, 2 * ms / n);
+        return 0;
+    }
     if (mode != "stand") std::printf("-- settled, pelvis y=%.3f\n", s.Pelvis().y);
 
     // The character faces +Z, so the shooter stands at +Z and fires towards -Z.
