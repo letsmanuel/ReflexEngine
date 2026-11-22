@@ -29,6 +29,7 @@ jobs:
           cp -r include/reflex pkg/engine/include/
           cp LICENSE README.md THIRD_PARTY_LICENSES.md pkg/engine/
           cp build-demo/demo/Release/reflex_demo.exe pkg/demo/
+          cp -r build-demo/demo/Release/assets pkg/demo/assets
           cp build-lib/src/Release/reflex.dll build-lib/src/Release/reflex.lib pkg/engine/
           git archive --format=zip --prefix=ReflexEngine-${GITHUB_REF_NAME}/ -o ReflexEngine-source-${GITHUB_REF_NAME}.zip HEAD
           cd pkg && 7z a -tzip ../ReflexEngine-windows-${GITHUB_REF_NAME}.zip demo engine
