@@ -13,17 +13,20 @@ using namespace reflex::test;
 static void Print(Scenario& s, float t) {
     const CharacterDebugInfo& d = s.Info();
     Vec3 p = s.Pelvis();
+    Quat qc = s.c.GetBodyPartTransform(BodyPart::Chest).rotation, qp = s.c.GetBodyPartTransform(BodyPart::Pelvis).rotation;
+    float relAng = Length((qp.Conjugate() * qc).ToRotationVector());
     Transform lf = s.c.GetBodyPartTransform(BodyPart::LeftFoot), rf = s.c.GetBodyPartTransform(BodyPart::RightFoot);
     std::printf("t=%5.2f pel=(%6.3f %5.3f %6.3f) tilt=%4.2f margin=%6.3f com=(%6.3f %5.3f %6.3f) feet L(%5.2f %5.2f %5.2f) R(%5.2f %5.2f %5.2f) "
-                "ctl=%4.2f step=%d%d load=%4.2f/%4.2f %s\n",
+                "chestRel=%4.2f ctl=%4.2f step=%d%d load=%4.2f/%4.2f %s\n",
                 t, p.x, p.y, p.z, d.tilt, d.supportMargin, d.com.x, d.com.y, d.com.z, lf.position.x, lf.position.y,
-                lf.position.z, rf.position.x, rf.position.y, rf.position.z, d.control, d.stepping[0], d.stepping[1],
+                lf.position.z, rf.position.x, rf.position.y, rf.position.z, relAng, d.control, d.stepping[0], d.stepping[1],
                 d.legLoad[0], d.legLoad[1], d.fallen ? "FALLEN" : "");
 }
 
 int main(int argc, char** argv) {
     std::string mode = argc > 1 ? argv[1] : "stand";
     float seconds = argc > 2 ? static_cast<float>(std::atof(argv[2])) : 4.0f;
+    Vec3 hitDir = argc > 4 ? Normalize(Vec3{static_cast<float>(std::atof(argv[3])), 0, static_cast<float>(std::atof(argv[4]))}) : Vec3{0, 0, -1};
     Scenario s;
     s.Run(1.0f); // settle
     if (mode == "bench") {
@@ -41,8 +44,8 @@ int main(int argc, char** argv) {
         Vec3 pt = s.c.GetBodyPartTransform(part).position;
         HitEvent h;
         h.bodyPart = part;
-        h.point = pt + Vec3{0, 0, 0.1f};
-        h.direction = {0, 0, -1};
+        h.point = pt - hitDir * 0.1f;
+        h.direction = hitDir;
         h.speed = 400;
         h.mass = 0.008f;
         h.impulse = 3.2f;
