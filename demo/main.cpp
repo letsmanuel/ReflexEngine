@@ -150,7 +150,9 @@ constexpr float kBallRadius = 0.45f;
 constexpr float kBallMass = 60.0f; // kg: a giant ball
 
 struct App {
-    int scene = 0; // 0 = shooting range, 1 = force lab
+    int scene = 0; // 0 = shooting range, 1 = force lab, 2 = sandbox (free-fly camera, huge baseplate)
+    Vector3 flyPos{0, 3.5f, 10.0f};
+    float flyYaw = 0.0f, flyPitch = -0.15f, flySpeed = 10.0f;
     bool charging = false;
     float chargeTime = 0.0f;
     std::vector<Ball> balls;
@@ -215,7 +217,8 @@ void AddStaticBox(App& a, rx::Vec3 center, rx::Vec3 half, Color color, bool addC
 
 void BuildScene(App& a, int scene) {
     a.backend = rx::CreateJoltBackend();
-    AddStaticBox(a, {0, -0.5f, 0}, {40, 0.5f, 40}, Color{70, 74, 82, 255});
+    const float ground = scene == 2 ? 400.0f : 40.0f;
+    AddStaticBox(a, {0, -0.5f, 0}, {ground, 0.5f, ground}, Color{70, 74, 82, 255});
     a.boxes.back().color = Color{58, 62, 70, 255};
     if (scene == 1) {
         // Force lab: open floor with a brick wall and crates behind the character to be thrown into.
@@ -224,6 +227,18 @@ void BuildScene(App& a, int scene) {
         AddStaticBox(a, {-4.0f, 1.5f, -10.0f}, {0.5f, 0.5f, 0.5f}, Color{150, 108, 62, 255});
         AddStaticBox(a, {4.0f, 0.5f, -9.0f}, {0.5f, 0.5f, 0.5f}, Color{176, 128, 72, 255});
         AddStaticBox(a, {0.0f, 0.15f, -7.0f}, {1.2f, 0.15f, 1.5f}, Color{110, 114, 124, 255});
+    } else if (scene == 2) {
+        // Sandbox: a long wall, crate towers and a row of pillars well away from the middle.
+        AddStaticBox(a, {0.0f, 3.0f, -70.0f}, {45.0f, 3.0f, 0.6f}, Color{150, 82, 70, 255});
+        AddStaticBox(a, {-50.0f, 3.0f, -40.0f}, {0.6f, 3.0f, 30.0f}, Color{120, 124, 134, 255});
+        AddStaticBox(a, {50.0f, 3.0f, -40.0f}, {0.6f, 3.0f, 30.0f}, Color{120, 124, 134, 255});
+        for (int i = 0; i < 6; ++i) {
+            AddStaticBox(a, {-40.0f + 2.1f * static_cast<float>(i % 3), 0.5f + static_cast<float>(i / 3), -30.0f}, {1.0f, 0.5f, 1.0f}, Color{176, 128, 72, 255});
+            AddStaticBox(a, {40.0f - 2.1f * static_cast<float>(i % 3), 0.5f + static_cast<float>(i / 3), -30.0f}, {1.0f, 0.5f, 1.0f}, Color{150, 108, 62, 255});
+        }
+        for (int i = 0; i < 10; ++i)
+            AddStaticBox(a, {-45.0f + 10.0f * static_cast<float>(i), 4.0f, 45.0f}, {0.8f, 4.0f, 0.8f}, Color{110, 114, 124, 255});
+        AddStaticBox(a, {0.0f, 6.0f, 80.0f}, {12.0f, 6.0f, 0.6f}, Color{150, 82, 70, 255});
     } else {
     // Cover: crates and walls around the character
     AddStaticBox(a, {3.0f, 0.5f, -2.5f}, {0.5f, 0.5f, 0.5f}, Color{176, 128, 72, 255});
@@ -271,6 +286,8 @@ void BuildScene(App& a, int scene) {
     set(rx::BodyPart::RightUpperArm, rx::Quat::FromAxisAngle({1, 0, 0}, -2.6f) * rx::Quat::FromAxisAngle({0, 0, 1}, -0.3f));
 }
 
+void SpawnScatter(App& a, int count);
+
 void LoadScene(App& a, int scene) {
     FreeSkinned(a.mainSkin);
     for (auto& k : a.crowdSkin) FreeSkinned(*k);
@@ -294,6 +311,12 @@ void LoadScene(App& a, int scene) {
     for (int i = 0; i < 120; ++i) a.world->Step(1.0f / 120.0f);
     if (a.useModel && !LoadSkinned(a.mainSkin)) a.useModel = false;
     a.camTarget = {0, 1.0f, 0};
+    if (scene == 2) {
+        a.flyPos = {0, 3.5f, 10.0f};
+        a.flyYaw = 0.0f;
+        a.flyPitch = -0.15f;
+        SpawnScatter(a, 16);
+    }
 }
 
 // Remove the crowd from the world (not just from our list), otherwise the characters keep living there.
@@ -321,7 +344,39 @@ void SpawnCrowd(App& a, int count) {
     for (int i = 0; i < 120; ++i) a.world->Step(1.0f / 120.0f);
 }
 
+// NPCs scattered around the map at random positions and headings (fixed seed, so the same every time).
+void SpawnScatter(App& a, int count) {
+    ClearCrowd(a);
+    unsigned seed = 7u;
+    auto rnd = [&seed]() {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<float>((seed >> 8) & 0xFFFF) / 65535.0f;
+    };
+    for (int i = 0; i < count; ++i) {
+        float r = 6.0f + 26.0f * rnd(), ang = 6.2832f * rnd();
+        rx::CharacterDesc d = MakeDesc(a.useModel, 1.75f);
+        d.spawn.position = {std::cos(ang) * r, 0.0f, std::sin(ang) * r};
+        d.spawn.rotation = rx::Quat::FromAxisAngle({0, 1, 0}, 6.2832f * rnd());
+        a.crowd.push_back(a.world->CreateCharacter(d));
+        if (a.useModel) {
+            auto sk = std::make_unique<Skinned>();
+            LoadSkinned(*sk);
+            a.crowdSkin.push_back(std::move(sk));
+        }
+    }
+    for (int i = 0; i < 120; ++i) a.world->Step(1.0f / 120.0f);
+}
+
 void UpdateCamera(App& a) {
+    if (a.scene == 2) {
+        Vector3 fwd{std::sin(a.flyYaw) * std::cos(a.flyPitch), std::sin(a.flyPitch), -std::cos(a.flyYaw) * std::cos(a.flyPitch)};
+        a.camera.position = a.flyPos;
+        a.camera.target = Vector3Add(a.flyPos, fwd);
+        a.camera.up = {0, 1, 0};
+        a.camera.fovy = 60.0f;
+        a.camera.projection = CAMERA_PERSPECTIVE;
+        return;
+    }
     a.camera.target = a.camTarget;
     a.camera.position = {a.camTarget.x + a.camDist * std::cos(a.camPitch) * std::sin(a.camYaw),
                          a.camTarget.y + a.camDist * std::sin(a.camPitch),
@@ -494,7 +549,8 @@ void DrawScene(const App& a) {
         DrawCube(V(b.center), b.half.x * 2, b.half.y * 2, b.half.z * 2, b.color);
         DrawCubeWires(V(b.center), b.half.x * 2, b.half.y * 2, b.half.z * 2, Fade(BLACK, 0.35f));
     }
-    DrawGrid(60, 1.0f);
+    if (a.scene == 2) DrawGrid(400, 2.0f);
+    else DrawGrid(60, 1.0f);
     if (a.useModel && a.mainSkin.loaded) {
         DrawModel(a.mainSkin.model, {0, 0, 0}, 1.0f, WHITE);
         for (const auto& k : a.crowdSkin) DrawModel(k->model, {0, 0, 0}, 1.0f, WHITE);
@@ -643,8 +699,16 @@ void DrawOverlay(App& a, bool interactive) {
     }
     DrawText(active.empty() ? "behaviour: (idle)" : TextFormat("behaviour: %s", active.c_str()), 12, H - 142, 16, Color{255, 210, 90, 255});
     DrawWrapped(std::string("reason: ") + d.reason, 12, H - 118, W - 24, 15, RAYWHITE);
-    if (a.scene == 1) {
-        DrawText("FORCE LAB: hold LMB to charge a giant ball, release to fire   |   C crowd   X clear   R reset   M model   1 shooting range", 12, H - 20, 13, GRAY);
+    if (a.scene == 2) {
+        DrawText("SANDBOX: WASD fly  Q/E down/up  Shift fast  wheel speed  RMB look  hold LMB to charge a ball, release to fire  |  C crowd  X clear  R reset  M model  1/2/3 scenes", 12, H - 20, 12, GRAY);
+        float ch = ChargeFraction(a);
+        int bw = 360, bx = W / 2 - bw / 2, by = H - 175;
+        if (a.charging || ch > 0) {
+            Bar(bx, by, bw, 16, ch, Color{255, 140, 40, 255});
+            DrawText(TextFormat("FORCE  %.0f m/s  (launch ~%.0f m/s)", BallSpeed(ch), kBallMass * BallSpeed(ch) / 75.0f), bx, by - 18, 14, ORANGE);
+        }
+    } else if (a.scene == 1) {
+        DrawText("FORCE LAB: hold LMB to charge a giant ball, release to fire   |   C crowd   X clear   R reset   M model   1 range  3 sandbox", 12, H - 20, 13, GRAY);
         float ch = ChargeFraction(a);
         int bw = 360, bx = W / 2 - bw / 2, by = H - 175;
         if (a.charging || ch > 0) {
@@ -652,7 +716,7 @@ void DrawOverlay(App& a, bool interactive) {
             DrawText(TextFormat("FORCE  %.0f m/s  (launch ~%.0f m/s)", BallSpeed(ch), kBallMass * BallSpeed(ch) / 75.0f), bx, by - 18, 14, ORANGE);
         }
     } else {
-        DrawText("LMB shoot   RMB orbit   wheel zoom   R reset   Tab overlay   A animation   C crowd   M model   2 force lab", 12, H - 20, 13, GRAY);
+        DrawText("LMB shoot   RMB orbit   wheel zoom   R reset   Tab overlay   A animation   C crowd   M model   2 force lab  3 sandbox", 12, H - 20, 13, GRAY);
     }
 }
 
@@ -779,6 +843,7 @@ int main(int argc, char** argv) {
             if (IsKeyPressed(KEY_X)) ClearCrowd(app);
             if (IsKeyPressed(KEY_ONE) && app.scene != 0) LoadScene(app, 0);
             if (IsKeyPressed(KEY_TWO) && app.scene != 1) LoadScene(app, 1);
+            if (IsKeyPressed(KEY_THREE) && app.scene != 2) LoadScene(app, 2);
         }
         if (IsKeyPressed(KEY_A)) {
             app.useAnimation = !app.useAnimation;
@@ -787,12 +852,34 @@ int main(int argc, char** argv) {
             else app.character.TakeProceduralControl(0.4f);
         }
         if (!capture && !bench) {
-            if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-                Vector2 md = GetMouseDelta();
-                app.camYaw -= md.x * 0.006f;
-                app.camPitch = Clamp(app.camPitch + md.y * 0.006f, -0.2f, 1.4f);
+            if (app.scene == 2) {
+                // Free-fly camera: RMB look, WASD move, Q/E (or Ctrl/Space) down/up, Shift fast, wheel = speed.
+                if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+                    Vector2 md = GetMouseDelta();
+                    app.flyYaw += md.x * 0.004f;
+                    app.flyPitch = Clamp(app.flyPitch - md.y * 0.004f, -1.5f, 1.5f);
+                }
+                app.flySpeed = Clamp(app.flySpeed + GetMouseWheelMove() * 2.0f, 2.0f, 80.0f);
+                float sp = app.flySpeed * (IsKeyDown(KEY_LEFT_SHIFT) ? 3.0f : 1.0f) * dt;
+                Vector3 fwd{std::sin(app.flyYaw) * std::cos(app.flyPitch), std::sin(app.flyPitch), -std::cos(app.flyYaw) * std::cos(app.flyPitch)};
+                Vector3 right{std::cos(app.flyYaw), 0, std::sin(app.flyYaw)};
+                Vector3 mv{0, 0, 0};
+                if (IsKeyDown(KEY_W)) mv = Vector3Add(mv, fwd);
+                if (IsKeyDown(KEY_S)) mv = Vector3Subtract(mv, fwd);
+                if (IsKeyDown(KEY_D)) mv = Vector3Add(mv, right);
+                if (IsKeyDown(KEY_A)) mv = Vector3Subtract(mv, right);
+                if (IsKeyDown(KEY_E) || IsKeyDown(KEY_SPACE)) mv.y += 1.0f;
+                if (IsKeyDown(KEY_Q) || IsKeyDown(KEY_LEFT_CONTROL)) mv.y -= 1.0f;
+                app.flyPos = Vector3Add(app.flyPos, Vector3Scale(mv, sp));
+                if (app.flyPos.y < 0.3f) app.flyPos.y = 0.3f;
+            } else {
+                if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+                    Vector2 md = GetMouseDelta();
+                    app.camYaw -= md.x * 0.006f;
+                    app.camPitch = Clamp(app.camPitch + md.y * 0.006f, -0.2f, 1.4f);
+                }
+                app.camDist = Clamp(app.camDist - GetMouseWheelMove() * 0.4f, 1.8f, 20.0f);
             }
-            app.camDist = Clamp(app.camDist - GetMouseWheelMove() * 0.4f, 1.8f, 20.0f);
             if (app.scene == 0) {
                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !MouseOverUI(app) && gActiveSlider == nullptr)
                     ShootFromCamera(app, GetMousePosition());
