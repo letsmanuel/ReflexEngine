@@ -151,6 +151,9 @@ void Character::Impl::Tick(float dt) {
     const bool lying = (chest.transform.position.y - groundRef) < 0.5f * s;
     const bool supine = chest.transform.rotation.Rotate({0, 0, 1}).y > 0.4f;
     lyingTime = lying ? lyingTime + dt : 0.0f;
+    // Once knocked down it stays down for a while, then gets up gradually (assist ramps back in over the last second).
+    if (lying && lyingTime > 0.4f) downHold = 3.0f;
+    else downHold = std::max(0.0f, downHold - dt);
 
     // ---- 2. Assess + decide -----------------------------------------------------------------------------
     BodyStateSummary sum;
@@ -170,6 +173,7 @@ void Character::Impl::Tick(float dt) {
     sum.lying = lying;
     sum.supine = supine;
     sum.lyingTime = lyingTime;
+    sum.downHold = downHold;
 
     Transform frame{pel.transform.position, headingActual};
     ThreatPicture picture = threat.Evaluate(frame, st[Index(BodyPart::Head)].transform.position);
@@ -278,7 +282,10 @@ void Character::Impl::Tick(float dt) {
         w[1] /= wsum;
     }
     const bool supported = wsum > 1e-4f;
-    const float assist = Saturate(control * T.assistScale * authority.Global()) * (supported ? 1.0f : 0.0f);
+    // Moving much faster than steps can catch (thrown, shoved by a vehicle...) the body loses its balance:
+    // the assist and the leg/torso muscles fade out until friction has slowed it down again.
+    const float overspeed = Saturate((Length(Horizontal(comVel)) - 3.5f) / 3.0f);
+    const float assist = Saturate(control * T.assistScale * authority.Global()) * (1.0f - overspeed) * (supported ? 1.0f : 0.0f);
     const bool lowAssist = assist < 0.02f;
 
     for (int i = 0; i < 2; ++i) injury.ReportLegLoad(i == 0 ? Side::Left : Side::Right, w[i], dt);
@@ -454,6 +461,7 @@ void Character::Impl::Tick(float dt) {
         float cap = injury.Capacity(p);
         if (IsTorsoPart(p)) cap = 0.55f + 0.45f * cap;
         float a = Saturate(authority.Effective(p, control, cap) * T.authorityScale[p]);
+        if (!IsArmPart(p) && !IsHeadPart(p)) a *= 1.0f - 0.8f * overspeed;
         tables::DriveBase base = tables::DriveFor(p);
         JointDrive d;
         d.target = delta[p];
