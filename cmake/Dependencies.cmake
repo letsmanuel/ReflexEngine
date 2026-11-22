@@ -1,5 +1,7 @@
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
+# Newer CMake (4.x) rejects dependencies that declare cmake_minimum_required < 3.5 (e.g. doctest).
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # ---- Jolt Physics (MIT) -----------------------------------------------------
 set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
