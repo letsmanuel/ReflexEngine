@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v0.1.0 to build and publish demo builds, the engine library and a source zip.
+# Push a tag like v0.1.0 to build the Windows demo, the engine DLL and a source zip.
 on:
   push:
     tags: ['v*']
@@ -9,29 +9,16 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: windows, os: windows-latest }
-          - { name: linux,   os: ubuntu-latest }
-          - { name: macos,   os: macos-latest }
+  release:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev
-      - name: Build demo (static engine)
+      - name: Build demo and run tests (static engine)
         run: |
           cmake -S . -B build-demo -DCMAKE_BUILD_TYPE=Release -DREFLEX_BUILD_TESTS=ON -DREFLEX_BUILD_DEMO=ON
           cmake --build build-demo --config Release --parallel
           ctest --test-dir build-demo --build-config Release --output-on-failure
-      - name: Build engine as shared library
+      - name: Build engine as DLL
         run: |
           cmake -S . -B build-lib -DCMAKE_BUILD_TYPE=Release -DREFLEX_BUILD_SHARED=ON -DREFLEX_BUILD_TESTS=OFF -DREFLEX_BUILD_DEMO=OFF
           cmake --build build-lib --config Release --parallel
@@ -41,28 +28,13 @@ jobs:
           mkdir -p pkg/demo pkg/engine/include
           cp -r include/reflex pkg/engine/include/
           cp LICENSE README.md THIRD_PARTY_LICENSES.md pkg/engine/
-          find build-demo/demo -maxdepth 2 -type f \( -name 'reflex_demo' -o -name 'reflex_demo.exe' \) -exec cp {} pkg/demo/ \;
-          find build-lib/src -maxdepth 2 -type f \( -name 'reflex.dll' -o -name 'reflex.lib' -o -name 'libreflex.so' -o -name 'libreflex.dylib' \) -exec cp {} pkg/engine/ \;
-          cd pkg && 7z a -tzip ../ReflexEngine-${{ matrix.name }}-${GITHUB_REF_NAME}.zip demo engine
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: ReflexEngine-*.zip
-
-  publish:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Source zip
-        run: git archive --format=zip --prefix=ReflexEngine-${GITHUB_REF_NAME}/ -o ReflexEngine-source-${GITHUB_REF_NAME}.zip HEAD
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
+          cp build-demo/demo/Release/reflex_demo.exe pkg/demo/
+          cp build-lib/src/Release/reflex.dll build-lib/src/Release/reflex.lib pkg/engine/
+          git archive --format=zip --prefix=ReflexEngine-${GITHUB_REF_NAME}/ -o ReflexEngine-source-${GITHUB_REF_NAME}.zip HEAD
+          cd pkg && 7z a -tzip ../ReflexEngine-windows-${GITHUB_REF_NAME}.zip demo engine
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            artifacts/*.zip
+            ReflexEngine-windows-*.zip
             ReflexEngine-source-*.zip
