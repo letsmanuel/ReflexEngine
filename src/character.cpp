@@ -59,29 +59,6 @@ const CharacterDesc& Character::Desc() const { return impl_->desc; }
 // ---------------------------------------------------------------------------------------------------------
 namespace {
 
-Quat QuatFromBasis(const Vec3& x, const Vec3& y, const Vec3& z) {
-    // Rotation matrix with columns x, y, z -> quaternion.
-    float m00 = x.x, m01 = y.x, m02 = z.x;
-    float m10 = x.y, m11 = y.y, m12 = z.y;
-    float m20 = x.z, m21 = y.z, m22 = z.z;
-    float tr = m00 + m11 + m22;
-    Quat q;
-    if (tr > 0) {
-        float s = std::sqrt(tr + 1.0f) * 2;
-        q = {(m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25f * s};
-    } else if (m00 > m11 && m00 > m22) {
-        float s = std::sqrt(1.0f + m00 - m11 - m22) * 2;
-        q = {0.25f * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s};
-    } else if (m11 > m22) {
-        float s = std::sqrt(1.0f + m11 - m00 - m22) * 2;
-        q = {(m01 + m10) / s, 0.25f * s, (m12 + m21) / s, (m02 - m20) / s};
-    } else {
-        float s = std::sqrt(1.0f + m22 - m00 - m11) * 2;
-        q = {(m02 + m20) / s, (m12 + m21) / s, 0.25f * s, (m10 - m01) / s};
-    }
-    return q.Normalized();
-}
-
 float SegmentSegmentDistance(const Vec3& p1, const Vec3& q1, const Vec3& p2, const Vec3& q2, float& s, float& t) {
     Vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
     float a = Dot(d1, d1), e = Dot(d2, d2), f = Dot(d2, r);
