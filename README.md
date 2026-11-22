@@ -2,7 +2,11 @@
 
 An open-source C++20 library for **dynamic, physics-driven character reactions**: hit reactions, balance, stumbling and self-preservation. Characters *perceive -> assess -> decide -> act* every tick, so a shot in the leg produces a limp towards cover, a bullet past the head makes them turn and lean away, a chest wound sends them to the ground curled up, and fatal damage fades control until they collapse. None of it is a canned animation: it emerges from an injury model, a balance controller and swappable behaviours. MIT licensed, no proprietary code.
 
-> Status: **v0.1 work in progress.** The demo draws a primitive humanoid, not a rigged model yet. See `docs/DECISIONS.md` for limitations. (Demo GIF: coming with the first release.)
+> Status: **v0.1 work in progress.** The demo draws a primitive humanoid, not a rigged model yet. See `docs/DECISIONS.md` for limitations.
+
+![Demo: leg hit, head near miss, chest hit, leg hit, headshot](docs/demo.gif)
+
+*Scripted demo run (`reflex_demo --capture`): shot in the right leg, bullet past the head, chest hit, left leg, headshot.*
 
 ## What reacts how
 
