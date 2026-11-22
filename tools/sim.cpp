@@ -52,6 +52,10 @@ int main(int argc, char** argv) {
         h.damage = dmg;
         s.c.ApplyHit(h);
     };
+    if (mode.rfind("launch", 0) == 0) {
+        float v = static_cast<float>(std::atof(mode.c_str() + 6)); // e.g. launch12 = 12 m/s velocity change
+        s.c.ApplyImpact(hitDir * (v * 75.0f), s.c.GetBodyPartTransform(BodyPart::Chest).position);
+    }
     if (mode == "legright") hit(BodyPart::RightLowerLeg, 35);
     if (mode == "legleft") hit(BodyPart::LeftLowerLeg, 35);
     if (mode == "torso") hit(BodyPart::Chest, 45);
