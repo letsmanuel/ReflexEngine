@@ -57,6 +57,7 @@ struct JointDesc {
     float maxAngle = 0.5f;         ///< Hinge: max angle (rad). Ball: max twist.
     float swingNormal = 0.6f;      ///< Ball: half cone angle around the normal axis (rad)
     float swingPlane = 0.6f;       ///< Ball: half cone angle around the plane axis (rad)
+    float frictionTorque = 0.0f;   ///< N*m of joint friction when not motor driven (stops passive limbs flopping)
 };
 
 /// Motor ("PD") drive of a joint. `target` is the desired rotation of the child relative to the

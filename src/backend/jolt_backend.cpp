@@ -157,6 +157,7 @@ public:
         s.mUserData = d.userData;
         s.mMaxAngularVelocity = 40.0f;
         if (!d.isStatic) {
+            s.mMotionQuality = JPH::EMotionQuality::LinearCast; // no tunnelling when launched at high speed
             s.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
             s.mMassPropertiesOverride.mMass = d.mass;
         }
@@ -205,6 +206,7 @@ public:
                 s.mNormalAxis1 = s.mNormalAxis2 = ToJ(Normalize(d.normalAxis));
                 s.mLimitsMin = d.minAngle;
                 s.mLimitsMax = d.maxAngle;
+                s.mMaxFrictionTorque = d.frictionTorque;
                 rec.constraint = s.Create(*b1, *b2);
             } else {
                 JPH::SwingTwistConstraintSettings s;
@@ -216,7 +218,7 @@ public:
                 s.mPlaneHalfConeAngle = d.swingPlane;
                 s.mTwistMinAngle = d.minAngle;
                 s.mTwistMaxAngle = d.maxAngle;
-                s.mMaxFrictionTorque = 0.0f;
+                s.mMaxFrictionTorque = d.frictionTorque;
                 rec.constraint = s.Create(*b1, *b2);
             }
         }
