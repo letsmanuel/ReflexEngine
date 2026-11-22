@@ -4,7 +4,8 @@ add_executable(reflex_tests
     test_injury.cpp
     test_authority.cpp
     test_balance.cpp
-    test_threat.cpp)
+    test_threat.cpp
+    test_behavior.cpp)
 
 target_link_libraries(reflex_tests PRIVATE reflex doctest::doctest)
 if(MSVC)
