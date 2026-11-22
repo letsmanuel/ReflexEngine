@@ -11,6 +11,7 @@ target_sources(reflex PRIVATE
     authority.cpp
     balance.cpp
     threat.cpp
+    behavior.cpp
     backend/jolt_backend.cpp)
 
 target_include_directories(reflex PUBLIC
