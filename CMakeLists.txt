@@ -33,6 +33,7 @@ add_subdirectory(src)
 if(REFLEX_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+    add_subdirectory(tools)
 endif()
 
 if(REFLEX_BUILD_DEMO)

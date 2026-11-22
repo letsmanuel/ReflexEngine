@@ -12,6 +12,10 @@ target_sources(reflex PRIVATE
     balance.cpp
     threat.cpp
     behavior.cpp
+    skeleton.cpp
+    character.cpp
+    character_control.cpp
+    world.cpp
     backend/jolt_backend.cpp)
 
 target_include_directories(reflex PUBLIC
