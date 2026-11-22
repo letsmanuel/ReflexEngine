@@ -32,6 +32,9 @@ struct BodyStateSummary {
     float speed = 0.0f;          ///< horizontal COM speed
     Quat heading;                ///< yaw-only orientation of the character (local +Z forward, +X left)
     Vec3 position;               ///< pelvis position
+    bool lying = false;          ///< body is down on the ground
+    bool supine = false;         ///< lying on the back
+    float lyingTime = 0.0f;      ///< seconds spent lying
 };
 
 struct BehaviorContext {
@@ -61,6 +64,10 @@ struct ReactionTargets {
     float assistScale = 1.0f;      ///< multiplier on the balance assist forces
     float collapse = 0.0f;         ///< 0..1 how far the collapse has progressed
     bool breakFall = false;
+    float groundPose = 0.0f;       ///< 0..1 blend from standing IK to the on-the-ground pose
+    bool struggle = false;         ///< lying on the back, trying (and failing) to get up
+    bool crawl = false;            ///< curled up / crawling protectively
+    float struggleStrength = 1.0f;
 
     ReactionTargets() { authorityScale.Fill(1.0f); }
 };
@@ -94,7 +101,7 @@ struct Decision {
 class REFLEX_API DecisionLayer {
 public:
     /// Creates the layer with the built-in behaviours: Brace, StumbleRecover, LimpAway, SeekCover,
-    /// TurnAndLeanAway, ProtectHead, ProtectWound, BreakFall, Collapse.
+    /// TurnAndLeanAway, ProtectHead, ProtectWound, BreakFall, Collapse, Incapacitated.
     DecisionLayer();
     ~DecisionLayer();
 
