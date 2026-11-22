@@ -254,11 +254,12 @@ public:
     Channel GetChannel() const override { return Channel::Fall; }
     float Score(const BehaviorContext& c) const override {
         if (c.injury.ControlLevel() < 0.3f) return 0.0f;
-        return Saturate((c.body.tilt - 0.55f) / 0.5f) * 0.9f;
+        if (c.body.supportMargin < 0.1f) return 0.0f; // still recoverable: keep stepping instead
+        return Saturate((c.body.tilt - 0.7f) / 0.5f) * 0.9f;
     }
     void Apply(const BehaviorContext& c, float w, ReactionTargets& o, std::string& clause) const override {
         o.breakFall = true;
-        o.assistScale *= 1.0f - 0.7f * w;
+        o.assistScale *= 1.0f - 0.5f * w;
         Vec3 local = c.body.heading.Conjugate().Rotate(c.body.tiltDirection);
         float fwd = std::max(0.0f, local.z), side = std::abs(local.x);
         for (Side s : {Side::Left, Side::Right}) {

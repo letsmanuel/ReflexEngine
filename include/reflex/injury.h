@@ -19,7 +19,7 @@ struct InjuryConfig {
     float painPerDamage = 0.02f;   ///< pain added per damage point (pain is 0..1)
     float painDecay = 0.12f;       ///< pain decays towards its floor by this much per second
     float painFloorFraction = 0.25f; ///< persistent pain = this * (1 - health fraction)
-    float shockPerDamage = 0.012f; ///< whole-body shock per damage point (scaled by vital weight)
+    float shockPerDamage = 0.006f; ///< whole-body shock per damage point (scaled by vital weight)
     float shockDecay = 0.10f;      ///< shock recovery per second
     float bleedPerDamage = 0.010f; ///< HP/s of bleeding added to a part per damage point
     float bleedMinDamage = 15.0f;  ///< wounds below this do not bleed
