@@ -2,6 +2,7 @@
 /// @file skeleton.h
 /// Skeleton / rig description, bone -> body-part mapping, poses and the humanoid ragdoll layout.
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -71,5 +72,13 @@ struct HumanoidRig {
     BodyMapping mapping;
 };
 REFLEX_API HumanoidRig MakeDefaultHumanoidRig(float height = 1.75f);
+
+/// Build a humanoid rig from bind-pose joint positions (model space, metres, one per BodyPart, indexed by
+/// `Index(part)`). Use it to give the ragdoll the proportions of your own character, e.g. short legs.
+/// The pelvis position is the centre of the pelvis; every other position is the joint where that part
+/// attaches to its parent. Arms and legs must hang straight down in the bind pose.
+REFLEX_API HumanoidRig MakeHumanoidRig(const std::array<Vec3, kBodyPartCount>& jointPositions);
+/// The joint positions MakeDefaultHumanoidRig uses, so they can be edited and passed to MakeHumanoidRig.
+REFLEX_API std::array<Vec3, kBodyPartCount> DefaultHumanoidJointPositions(float height = 1.75f);
 
 } // namespace reflex
