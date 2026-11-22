@@ -53,6 +53,9 @@ public:
     void Reset();
     void RegisterHit(const HitEvent& hit);
     void RegisterNearMiss(const NearMissEvent& miss);
+    /// Same, but latches which side of the body the bullet passed at this moment (relative to the character's
+    /// frame and head position), so the answer does not change as the character moves afterwards.
+    void RegisterNearMiss(const NearMissEvent& miss, const Transform& frame, const Vec3& headPosition);
     void Update(float dt);
 
     void AddCoverPoint(const CoverPoint& c) { cover_.push_back(c); }
@@ -80,6 +83,8 @@ private:
         float distance = 1.0f;
         BodyPart part = BodyPart::Head;
         float age = 1e9f;
+        bool latched = false;
+        Side side = Side::Left;
     };
     Memory memory_;
     NearMiss miss_;
